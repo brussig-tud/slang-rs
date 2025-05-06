@@ -8,5 +8,9 @@ publish = false
 [dependencies]
 slang-sys = {path="slang-sys"}
 
+[features]
+default = []
+copy_libs = ["slang-sys/copy_libs"]
+
 [workspace]
 members = ["slang-sys"]

@@ -8,3 +8,7 @@ publish = false
 [build-dependencies]
 bindgen = "*"
 cmake = "*"
+
+[features]
+default = []
+copy_libs = []

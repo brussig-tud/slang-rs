@@ -17,6 +17,24 @@ use cmake;
 // Functions
 //
 
+/// Find the path to the target directory of the current Cargo invokation
+// Adapted from the following issue: https://github.com/rust-lang/cargo/issues/9661#issuecomment-1722358176
+fn get_cargo_target_dir(out_dir: &Path) -> Result<PathBuf, Box<dyn std::error::Error>>
+{
+	let profile = env::var("PROFILE")?;
+	let mut target_dir = None;
+	let mut sub_path = out_dir;
+	while let Some(parent) = sub_path.parent() {
+		if parent.ends_with(&profile) {
+			target_dir = Some(parent);
+			break;
+		}
+		sub_path = parent;
+	}
+	let target_dir = target_dir.ok_or("<not_found>")?;
+	Ok(target_dir.to_path_buf())
+}
+
 /// Custom build steps – build Slang SDK and handle all additional steps required to make it work on WASM.
 fn main ()
 {
@@ -24,6 +42,10 @@ fn main ()
 	let out_dir = env::var("OUT_DIR")
 		.map(PathBuf::from)
 		.expect("The output directory must be set by Cargo as an environment variable");
+
+	// Obtain the target directory
+	let target_dir = get_cargo_target_dir(out_dir.as_path())
+		.expect("The Cargo target directory should be inferrable from OUT_DIR");
 
 	// Determine CMake install destination and build type
 	let (cmake_build_type, cmake_install_dest) = if cfg!(debug_assertions) {
@@ -43,12 +65,35 @@ fn main ()
 
 		// Native Slang build
 		_ => {
+			// Build and install into OUT_DIR
 			let slang_path = fs::canonicalize("../vendor/slang")
 				.expect("Slang repository must be included as a submodule inside the '/vendor' directory");
 			let _dst = cmake::Config::new(slang_path)
 				.profile(cmake_build_type)
 				.define("CMAKE_INSTALL_PREFIX", cmake_install_dest.as_os_str())
 				.build();
+
+			// Copy libs to target dir if requested
+			if env::var("CARGO_FEATURE_COPY_LIBS").is_ok()
+			{
+				// Copy libs
+				for entry in fs::read_dir(cmake_install_dest.join("lib"))
+					.expect("The Slang installation directory must contain a 'lib' subdirectory")
+				{
+					let entry = entry.unwrap();
+					if entry.file_type().unwrap().is_file() {
+						fs::copy(entry.path(), target_dir.join(entry.file_name()))
+							.expect(format!(
+								"Failed to copy '{}' to '{}'", entry.path().display(), target_dir.display()
+							).as_str());
+					}
+				};
+
+				// Make sure they're being used by any dependent executable
+				if !env::var("CARGO_CFG_WINDOWS").is_ok() {
+					println!("cargo:rustc-link-arg=-Wl,-rpath=$ORIGIN");
+				}
+			}
 		}
 	}
 
