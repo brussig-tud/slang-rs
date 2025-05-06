@@ -20,16 +20,16 @@ use cmake;
 /// Custom build steps – build Slang SDK and handle all additional steps required to make it work on WASM.
 fn main ()
 {
-	// Determine target path
-	let target_path = fs::canonicalize(
-		Path::new(env::var("CARGO_MANIFEST_DIR").unwrap().as_str()).join("../target")
-	).expect("Could not determine 'target' path for the build - non-standard setup?");
+	// Obtain the output directory
+	let out_dir = env::var("OUT_DIR")
+		.map(PathBuf::from)
+		.expect("The output directory must be set by Cargo as an environment variable");
 
 	// Determine CMake install destination and build type
 	let (cmake_build_type, cmake_install_dest) = if cfg!(debug_assertions) {
-		("Debug", target_path.join("debug/slang-install"))
+		("Debug", out_dir.join("slang-install"))
 	} else {
-		("Release", target_path.join("release/slang-install"))
+		("Release", out_dir.join("slang-install"))
 	};
 
 	// Configure and build Slang
@@ -43,7 +43,9 @@ fn main ()
 
 		// Native Slang build
 		_ => {
-			let _dst = cmake::Config::new("../vendor/slang")
+			let slang_path = fs::canonicalize("../vendor/slang")
+				.expect("Slang repository must be included as a submodule inside the '/vendor' directory");
+			let _dst = cmake::Config::new(slang_path)
 				.profile(cmake_build_type)
 				.define("CMAKE_INSTALL_PREFIX", cmake_install_dest.as_os_str())
 				.build();
@@ -57,10 +59,6 @@ fn main ()
 			format!("Slang SDK was successfully build in '{}'", cmake_install_dest.display()).as_str()
 		)
 	};
-
-	let out_dir = env::var("OUT_DIR")
-		.map(PathBuf::from)
-		.expect("Couldn't determine output directory.");
 
 	link_libraries(&slang_dir);
 
