@@ -1,23 +1,61 @@
-extern crate bindgen;
 
-use std::env;
-use std::path::{Path, PathBuf};
+//////
+//
+// Imports
+//
 
-fn main() {
-	println!("cargo:rerun-if-env-changed=SLANG_DIR");
-	println!("cargo:rerun-if-env-changed=VULKAN_SDK");
+// Standard library
+use std::{env, path::{Path, PathBuf}, fs};
 
-	let mut include_file = PathBuf::from("include");
-	let slang_dir = if let Ok(slang_dir) = env::var("SLANG_DIR").map(PathBuf::from) {
-		include_file = include_file.join("slang.h");
-		slang_dir
-	} else if let Ok(vulkan_sdk_dir) = env::var("VULKAN_SDK").map(PathBuf::from) {
-		include_file = include_file.join("slang/slang.h");
-		vulkan_sdk_dir
+// CMake crate
+use cmake;
+
+
+
+//////
+//
+// Functions
+//
+
+/// Custom build steps – build Slang SDK and handle all additional steps required to make it work on WASM.
+fn main ()
+{
+	// Determine target path
+	let target_path = fs::canonicalize(
+		Path::new(env::var("CARGO_MANIFEST_DIR").unwrap().as_str()).join("../target")
+	).expect("Could not determine 'target' path for the build - non-standard setup?");
+
+	// Determine CMake install destination and build type
+	let (cmake_build_type, cmake_install_dest) = if cfg!(debug_assertions) {
+		("Debug", target_path.join("debug/slang-install"))
 	} else {
-		panic!(
-			"Environment `SLANG_DIR` should be set to the directory of a Slang installation, or `VULKAN_SDK` should be set to the directory of the Vulkan SKD installation."
-		);
+		("Release", target_path.join("release/slang-install"))
+	};
+
+	// Configure and build Slang
+	match env::var("CARGO_CFG_TARGET_ARCH").expect("Unable to determine target architecture").as_ref()
+	{
+		// WASM is not yet supported
+		"wasm32" => {
+			println!("cargo::error={}", "WASM builds not yet supported");
+			return;
+		},
+
+		// Native Slang build
+		_ => {
+			let _dst = cmake::Config::new("../vendor/slang")
+				.profile(cmake_build_type)
+				.define("CMAKE_INSTALL_PREFIX", cmake_install_dest.as_os_str())
+				.build();
+		}
+	}
+
+	let include_file;
+	let slang_dir = {
+		include_file = cmake_install_dest.join("include/slang.h");
+		fs::canonicalize(cmake_install_dest.as_path()).expect(
+			format!("Slang SDK was successfully build in '{}'", cmake_install_dest.display()).as_str()
+		)
 	};
 
 	let out_dir = env::var("OUT_DIR")

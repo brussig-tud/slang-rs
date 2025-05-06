@@ -6,9 +6,7 @@ license = "MIT OR Apache-2.0"
 publish = false
 
 [dependencies]
-slang-sys = { path = "slang-sys" }
+slang-sys = {path="slang-sys"}
 
 [workspace]
-members = [
-	"slang-sys"
-]
+members = ["slang-sys"]
