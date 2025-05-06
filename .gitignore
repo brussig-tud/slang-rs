@@ -1,6 +1,10 @@
-debug/
-target/
+# Cargo configuration cache
 Cargo.lock
 
-.cargo/
-.vscode/
+# Build artifacts
+target
+Cargo.lock
+
+# IDE files
+/.idea
+/.vscode
