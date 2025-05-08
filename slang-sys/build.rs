@@ -89,9 +89,11 @@ fn main ()
 					}
 				};
 
-				// Make sure they're being used by any dependent executable
+				// Set linker flags accordingly
 				if !env::var("CARGO_CFG_WINDOWS").is_ok() {
-					println!("cargo:rustc-link-arg=-Wl,-rpath=$ORIGIN");
+					let link_args = "-Wl,-rpath=$ORIGIN";
+					println!("cargo:rustc-link-arg={link_args}");
+					println!("cargo:REQUIRED_LINK_ARGS={link_args}");
 				}
 			}
 		}
