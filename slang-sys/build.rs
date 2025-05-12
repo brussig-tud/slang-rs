@@ -119,13 +119,13 @@ fn main () -> Result<(), Box<dyn std::error::Error>>
 	// Preamble
 
 	// Launch VS Code LLDB debugger if it is installed and attach to the build script
-	let url = format!(
+	/*let url = format!(
 		"vscode://vadimcn.vscode-lldb/launch/config?{{'request':'attach','pid':{}}}", std::process::id()
 	);
 	if let Ok(result) = std::process::Command::new("code").arg("--open-url").arg(url).output()
 	    && result.status.success() {
 		std::thread::sleep(std::time::Duration::from_secs(4)); // <- give debugger time to attach
-	}
+	}*/
 
 	// Obtain the output directory
 	let out_dir = env::var("OUT_DIR")
@@ -151,6 +151,7 @@ fn main () -> Result<(), Box<dyn std::error::Error>>
 	let slang_path = fs::canonicalize("../vendor/slang")
 		.expect("Slang repository must be included as a submodule inside the '/vendor' directory");
 	let slang_lib_type;
+	let bindgen_slang_include_base;
 	match env::var("CARGO_CFG_TARGET_ARCH").expect("Unable to determine target architecture").as_ref()
 	{
 		// WASM is not yet supported
@@ -245,7 +246,15 @@ fn main () -> Result<(), Box<dyn std::error::Error>>
 					}
 				};
 			}
-			slang_lib_type = "staticlib";
+			slang_lib_type = "static";
+
+			// FIXME: also do a native buiĺd so we can use bindgen
+			bindgen_slang_include_base = Path::new("/tmp/slang-native-install");
+			let _dst = cmake::Config::new(slang_path)
+				.target("x86_64-unknown-linux-gnu")
+				.profile(cmake_build_type)
+				.define("CMAKE_INSTALL_PREFIX", bindgen_slang_include_base.to_str().unwrap())
+				.build();
 		},
 
 		// Native Slang build
@@ -281,6 +290,7 @@ fn main () -> Result<(), Box<dyn std::error::Error>>
 				}
 			}
 			slang_lib_type = "dylib";
+			bindgen_slang_include_base = cmake_install_dest.as_path();
 		}
 	}
 
@@ -293,22 +303,35 @@ fn main () -> Result<(), Box<dyn std::error::Error>>
 	let include_path;
 	let include_path_arg;
 	let slang_dir = {
-		include_file = cmake_install_dest.join("include/slang.h");
-		include_path = cmake_install_dest.join("include");
+		include_path = bindgen_slang_include_base.join("include");
 		include_path_arg = format!("-I{}", include_path.display());
+		include_file = include_path.join("slang.h");
 		fs::canonicalize(cmake_install_dest.as_path()).expect(
 			format!("Slang SDK should have been successfully build in '{}'", cmake_install_dest.display()).as_str()
 		)
 	};
 
+	// Setup environment
+	if env::var("CARGO_CFG_TARGET_ARCH").unwrap() == "wasm32" {
+		unsafe {env::set_var("CLANG_PATH", "/opt/SDKs/emscripten/upstream/bin/clang") };
+	}
+
 	link_libraries(&slang_dir, slang_lib_type);
 
-	bindgen::builder()
+	let mut bindgen_builder = bindgen::builder()
 		.header(slang_dir.join(include_file).to_str().unwrap())
 		.clang_arg("-v")
 		.clang_arg("-xc++")
 		.clang_arg("-std=c++17")
-		.clang_arg(include_path_arg)
+		.clang_arg(include_path_arg);
+	if env::var("CARGO_CFG_TARGET_ARCH").unwrap() == "wasm32" {
+		//let clang_include_path_arg = "-I/opt/SDKs/emscripten/upstream/lib/clang/21/include";
+		bindgen_builder = bindgen_builder/*
+			.clang_arg(clang_include_path_arg)
+			.detect_include_paths(true);*/
+			.clang_arg("--target=x86_64-unknown-linux-gnu");
+	}
+	bindgen_builder
 		.allowlist_function("spReflection.*")
 		.allowlist_function("spComputeStringHash")
 		.allowlist_function("slang_.*")
