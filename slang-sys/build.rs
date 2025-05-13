@@ -18,10 +18,8 @@
 //
 
 // Standard library
-use std::{env, path::{Path, PathBuf}, fs, process};
+use std::{env, fs, path::{Path, PathBuf}, process};
 use std::fmt::Display;
-// CMake crate
-use cmake;
 
 
 
@@ -30,18 +28,46 @@ use cmake;
 // Errors
 //
 
-/// A simple error indicating that an external command invoked via [`std::process::Command`] failed.
+/// An error indicating that an external command invoked via [`std::process::Command`] failed, holding the complete
+/// [output](std::process::Output) that the command produced.
 #[derive(Debug)]
 pub struct CommandFailedError {
 	/// A short descriptive name for the command that failed.
 	pub command_name: String,
+	pub output: std::process::Output
+}
+impl CommandFailedError
+{
+	pub fn format_stdstream (formatter: &mut std::fmt::Formatter<'_>, prefix: &str, stream_buf: &[u8])
+	-> std::fmt::Result {
+		for line in String::from_utf8_lossy(stream_buf).lines() {
+			write!(formatter, "{prefix}{line}")?;
+		}
+		Ok(())
+	}
 }
 impl Display for CommandFailedError {
 	fn fmt (&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		write!(formatter, "CommandFailedError[`{}`]", self.command_name)
+		write!(formatter, "CommandFailedError[`{}` -> {}]", self.command_name, self.output.status)?;
+		Self::format_stdstream(formatter, " stdout: ", &self.output.stdout)?;
+		Self::format_stdstream(formatter, " stderr: ", &self.output.stderr)
 	}
 }
 impl std::error::Error for CommandFailedError {}
+
+/// A simple error indicating that some entity could not be represented exactly as a Unicode string, e.g. because it
+/// contains non-displayable characters.
+#[derive(Debug)]
+pub struct NotStringRepresentableError {
+	/// A lossy representation of the problematic entity.
+	pub lossy_string: String,
+}
+impl Display for NotStringRepresentableError {
+	fn fmt (&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+		write!(formatter, "NotStringRepresentableError[`{}`]", self.lossy_string)
+	}
+}
+impl std::error::Error for NotStringRepresentableError {}
 
 
 
@@ -49,6 +75,15 @@ impl std::error::Error for CommandFailedError {}
 //
 // Functions
 //
+
+/// Converts the given path to a unicode string slice if possible, erroring out if the path contains non-displayable
+/// characters.
+fn path_to_str<'path, PathRef: AsRef<Path>+'path+?Sized> (path: &'path PathRef)
+-> Result<&'path str, NotStringRepresentableError> {
+	path.as_ref().to_str().ok_or(NotStringRepresentableError {
+		lossy_string: path.as_ref().to_string_lossy().to_string()
+	})
+}
 
 /// Find the path to the target directory of the current Cargo invocation.
 /// Adapted from the following issue: https://github.com/rust-lang/cargo/issues/9661#issuecomment-1722358176
@@ -72,17 +107,8 @@ fn get_cargo_target_dir(out_dir: &Path) -> Result<PathBuf, Box<dyn std::error::E
 /// the output does not indicate success.
 fn check_process_output (output: std::process::Output, command_name: impl AsRef<str>) -> Result<(), CommandFailedError>
 {
-	if !output.status.success()
-	{
-		println!("cargo::warning={} {}", command_name.as_ref(), output.status);
-		for line in String::from_utf8_lossy(&output.stderr).lines() {
-			println!("cargo::warning={} stdout: {line}", command_name.as_ref());
-		}
-		for line in String::from_utf8_lossy(&output.stdout).lines() {
-			println!("cargo::warning={} stderr: {line}", command_name.as_ref());
-		}
-		println!("cargo::error={} failed", command_name.as_ref());
-		Err(CommandFailedError{ command_name: String::from(command_name.as_ref()) })
+	if !output.status.success() {
+		Err(CommandFailedError{ command_name: String::from(command_name.as_ref()), output })
 	}
 	else {
 		Ok(())
@@ -110,6 +136,86 @@ fn copy_recursively<SrcPathRef: AsRef<Path>, DstPathRef: AsRef<Path>> (source: S
 		}
 	}
 	Ok(())
+}
+
+/// Builds *Slang*-native from the given source directory with the given *CMake* generator and build type, and installs
+/// it to the specified target directory if the build was successful.
+fn build_slang_native_with_generator (src_dir: &Path, install_target_dir: &Path, cmake_generator: &str, cmake_build_type: &str)
+	-> Result<(), Box<dyn std::error::Error>>
+{
+	// Preamble
+	let install_target_dir_str = path_to_str(install_target_dir)?;
+	let install_dir_arg = format!("-DCMAKE_INSTALL_PREFIX={install_target_dir_str}");
+	let build_type_arg = format!("-DCMAKE_BUILD_TYPE={cmake_build_type}");
+
+	// Configure and generate
+	let cmake_result = process::Command::new("cmake")
+		.current_dir(src_dir)
+		.args([
+			"--preset", "default", install_dir_arg.as_str(), build_type_arg.as_str(),
+			"-DCMAKE_CONFIGURATION_TYPES=Debug;Release", "-G", cmake_generator
+		])
+		.output()
+		.expect("build_slang_native: Could not spawn CMake configure/generate process");
+	check_cmake_output(cmake_result)?;
+
+	// Build
+	let cmake_result = process::Command::new("cmake")
+		.current_dir(src_dir)
+		.args(["--build", "--preset", cmake_build_type.to_lowercase().as_str()])
+		.output()
+		.expect("build_slang_native: Could not spawn CMake build process");
+	check_cmake_output(cmake_result)?;
+
+	// Install
+	let cmake_result = process::Command::new("cmake")
+		.current_dir(src_dir)
+		.args(["--install", "build", "--prefix", install_target_dir_str])
+		.output()
+		.expect("build_slang_native: Could not spawn CMake install process");
+	Ok(check_cmake_output(cmake_result)?)
+}
+
+/// Try to build *Slang*-native for the current build type, trying a several generators that make sense for the current
+/// platform until one of them succeeds, and install it into the indicated target directory. If none of the generators
+/// work, the function returns an error containing the output of the final *CMake* invocation that was run.
+fn try_build_slang_native (src_dir: &Path, install_target_dir: &Path)
+	-> Result<(), Box<dyn std::error::Error>>
+{
+	// Infer CMake build type from the current *Cargo* profile
+	let cmake_build_type = match std::env::var("PROFILE")?.as_str() {
+		"debug"   => "Debug",
+		"release" => "Release",
+		profile => {
+			println!("cargo::error=try_build_slang_native: Unknown Cargo profile: {profile}");
+			return Err(format!("Unknown Cargo profile: {profile}").into());
+		}
+	};
+
+	// Infer generators to try
+	let generators;
+	#[cfg(target_os="windows")] {
+		generators = ["Ninja", "Visual Studio 17 2022"];
+	}
+	#[cfg(target_os="macos")] {
+		 generators = ["Ninja", "Xcode"];
+	}
+	#[cfg(all(not(target_os="windows"),not(target_os="macos")))] {
+		generators = ["Ninja", "Unix Makefiles"];
+	}
+
+	// Try building with the generator
+	let mut result = Ok(());
+	for generator in generators {
+		result = build_slang_native_with_generator(src_dir, install_target_dir, generator, cmake_build_type);
+		if result.is_ok() {
+			return result;
+		}
+		std::fs::remove_dir_all(src_dir.join("build"))
+			.expect("Failed to clean up the Slang build directory after failed CMake build attempt");
+		continue;
+	}
+	result
 }
 
 /// Custom build steps – build Slang SDK and handle all additional steps required to make it work on WASM.
@@ -158,9 +264,7 @@ fn main () -> Result<(), Box<dyn std::error::Error>>
 		"wasm32" => {
 			// cmake --workflow --preset generators --fresh
 			let generators_build_path =  slang_path.join("build");
-			let generators_build_path_arg = generators_build_path.to_str().expect(
-				"Slang generators build directory must have String-representable name"
-			).to_owned();
+			let generators_build_path_arg = path_to_str(generators_build_path.as_path())?;
 			let cmake_result = process::Command::new("cmake")
 				.current_dir(slang_path.as_path())
 				.args(["--workflow", "--preset", "generators", "--fresh"])
@@ -173,14 +277,11 @@ fn main () -> Result<(), Box<dyn std::error::Error>>
 			if !generators_dir.exists() {
 				fs::create_dir(generators_dir.as_path()).expect("Failed to create generators directory");
 			}
-			let generators_dir_arg = generators_dir.to_str().expect(
-				"Slang generators build directory must have String-representable name"
-			).to_owned();
+			let generators_dir_arg = path_to_str(generators_dir.as_path())?;
 			let cmake_result = process::Command::new("cmake")
 				.current_dir(slang_path.as_path())
 				.args([
-					"--install", generators_build_path_arg.as_str(), "--prefix", generators_dir_arg.as_str(),
-					"--component", "generators"
+					"--install", generators_build_path_arg, "--prefix", generators_dir_arg, "--component", "generators"
 				])
 				.output()
 				.expect("Could not spawn CMake process");
@@ -188,22 +289,18 @@ fn main () -> Result<(), Box<dyn std::error::Error>>
 
 			// emcmake cmake -DSLANG_GENERATORS_PATH=generators/bin --preset emscripten -G "Ninja"
 			let generators_dir_option = format!(
-				"-DSLANG_GENERATORS_PATH={}",
-				generators_dir.join("bin").to_str()
-					.unwrap() // <- this can't fail because string-representability already verified for generators_dir
+				"-DSLANG_GENERATORS_PATH={}", path_to_str(generators_dir.join("bin").as_path())?
 			);
 			let slang_build_dir =  out_dir.join("slang-build");
 			if !slang_build_dir.exists() {
 				fs::create_dir(slang_build_dir.as_path()).expect("Failed to create Slang build directory");
 			}
-			let slang_build_dir_arg = slang_build_dir.to_str().expect(
-				"Slang build directory must have String-representable name"
-			).to_owned();
+			let slang_build_dir_arg = path_to_str(slang_build_dir.as_path())?;
 			let cmake_result = process::Command::new("emcmake")
 				.current_dir(slang_path.as_path())
 				.args([
 					"cmake", generators_dir_option.as_str(), "--preset", "emscripten", "-G", "Ninja",
-					"-B", slang_build_dir_arg.as_str()
+					"-B", slang_build_dir_arg
 				])
 				.output()
 				.expect("Could not spawn emcmake process");
@@ -250,21 +347,13 @@ fn main () -> Result<(), Box<dyn std::error::Error>>
 
 			// FIXME: also do a native buiĺd so we can use bindgen
 			bindgen_slang_include_base = Path::new("/tmp/slang-native-install");
-			let _dst = cmake::Config::new(slang_path)
-				.target("x86_64-unknown-linux-gnu")
-				.profile(cmake_build_type)
-				.define("CMAKE_INSTALL_PREFIX", bindgen_slang_include_base.to_str().unwrap())
-				.build();
+			try_build_slang_native(slang_path.as_path(), bindgen_slang_include_base)?;
 		},
 
 		// Native Slang build
 		_ => {
-			// Build and install into OUT_DIR
-
-			let _dst = cmake::Config::new(slang_path)
-				.profile(cmake_build_type)
-				.define("CMAKE_INSTALL_PREFIX", cmake_install_dest.as_os_str())
-				.build();
+			// Build and install into $OUT_DIR
+			try_build_slang_native(slang_path.as_path(), cmake_install_dest.as_path())?;
 
 			// Copy libs to target dir if requested
 			if env::var("CARGO_FEATURE_COPY_LIBS").is_ok()
