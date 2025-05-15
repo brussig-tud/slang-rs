@@ -18,8 +18,31 @@
 //
 
 // Standard library
-use std::{env, fs, path::{Path, PathBuf}, process};
-use std::fmt::Display;
+use std::{env, fs, process, fmt::Display, path::{Path, PathBuf}};
+
+// Reqwest crate
+use reqwest;
+
+// Zip-extract crate
+use zip_extract as zip;
+
+
+
+//////
+//
+// Constants
+//
+
+/// The *Slang* version this crate is tested against.
+const SLANG_VERSION: &str = "2025.8.1";
+
+/// Evaluates to the pattern according to which the parent URL for *Slang* binary releases is composed.
+#[allow(non_snake_case)]
+macro_rules! SLANG_RELEASE_URL_BASE {() => {"https://github.com/shader-slang/slang/releases/download/v{version}/"};}
+
+/// Evaluates to the pattern according to which *Slang* binary releases are named.
+#[allow(non_snake_case)]
+macro_rules! SLANG_PACKAGE_NAME {() => {"slang-{version}-{os}-{arch}.zip"};}
 
 
 
@@ -69,6 +92,47 @@ impl Display for NotStringRepresentableError {
 }
 impl std::error::Error for NotStringRepresentableError {}
 
+/// A simple error indicating that a web request did not result in a `200 OK` response.
+#[derive(Debug)]
+pub struct HttpResponseNotOkError {
+	/// The URL of the request that did not respond with `200 OK`.
+	pub url: String,
+
+	/// The full response of the request that did not respond with `200 OK`.
+	pub response: reqwest::blocking::Response
+}
+impl HttpResponseNotOkError {
+	/// Create a new instance for the given `url` and `response`.o
+	pub fn new (url: impl Into<String>, response: reqwest::blocking::Response) -> Self { Self {
+		url: url.into(), response
+	}}
+}
+impl Display for HttpResponseNotOkError {
+	fn fmt (&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+		write!(formatter, "HttpResponseNotOkError[`{}`<-{}]", self.response.status(), self.url)
+	}
+}
+impl std::error::Error for HttpResponseNotOkError {}
+
+
+
+//////
+//
+// Structs
+//
+
+/// Stores information about a *Slang* installation.
+struct SlangInstall {
+	directory: PathBuf,
+
+	#[allow(dead_code)] // we might need this in the future
+	include_path: PathBuf,
+
+	include_file: PathBuf,
+	include_path_arg: String,
+	lib_type: &'static str
+}
+
 
 
 //////
@@ -101,6 +165,50 @@ fn get_cargo_target_dir(out_dir: &Path) -> Result<PathBuf, Box<dyn std::error::E
 	}
 	let target_dir = target_dir.ok_or("<not_found>")?;
 	Ok(target_dir.to_path_buf())
+}
+
+/// Request from the given URL and return the full response body as a sequence of bytes.
+pub fn download (url: impl reqwest::IntoUrl) -> Result<bytes::Bytes, Box<dyn std::error::Error>> {
+	let dl_response = reqwest::blocking::get(url.as_str())?;
+	if dl_response.status() != reqwest::StatusCode::OK {
+		return Err(HttpResponseNotOkError::new(url.as_str(), dl_response).into())
+	}
+	Ok(dl_response.bytes()?)
+}
+
+/// Request from the given URL and store the response body in the given file.
+pub fn download_to_file (url: impl reqwest::IntoUrl, filepath: impl AsRef<crate::Path>)
+-> Result<(), Box<dyn std::error::Error>> {
+	let response_bytes = download(url)?;
+	Ok(fs::write(filepath.as_ref(), response_bytes)?)
+}
+
+/// Request an archive file from the given URL and extract its contents (without the root/parent directory if the
+/// archive contains one) to the given path.
+pub fn download_and_extract (url: impl reqwest::IntoUrl, dirpath: impl AsRef<crate::Path>)
+-> Result<(), Box<dyn std::error::Error>> {
+	let response_bytes = download(url).or_else(|err| {
+		println!("cargo::error=download_and_extract: Failed to download archive!");
+		println!("cargo::error=download_and_extract: download error: {}", err.as_ref());
+		Err(err)
+	})?;
+	Ok(zip::extract(std::io::Cursor::new(response_bytes), dirpath.as_ref(), true)?)
+}
+
+///
+pub fn depend_on_downloaded_file (url: impl reqwest::IntoUrl, filepath: impl AsRef<crate::Path>)
+-> Result<(), Box<dyn std::error::Error>> {
+	download_to_file(url, filepath.as_ref())?;
+	println!("cargo:rerun-if-changed={}", filepath.as_ref().display());
+	Ok(())
+}
+
+///
+pub fn depend_on_downloaded_directory (url: impl reqwest::IntoUrl, dirpath: impl AsRef<crate::Path>)
+-> Result<(), Box<dyn std::error::Error>> {
+	download_and_extract(url, dirpath.as_ref())?;
+	println!("cargo:rerun-if-changed={}", dirpath.as_ref().display());
+	Ok(())
 }
 
 /// Check the given [std::process::Output](process output) for errors, emitting *Cargo* output detailing the problem if
@@ -220,36 +328,86 @@ fn try_build_slang_native (src_dir: &Path, install_target_dir: &Path)
 	result
 }
 
-/// Custom build steps – build Slang SDK and handle all additional steps required to make it work on WASM.
-fn main () -> Result<(), Box<dyn std::error::Error>>
+///
+fn get_slang_install_at_path (slang_install_path: impl AsRef<Path>, lib_type: &'static str) -> Option<SlangInstall>
 {
-	////
-	// Preamble
+	// Validate directory structure
+	let include_file = if let Ok(existing_file) = fs::canonicalize(
+		slang_install_path.as_ref().join("include/slang.h")
+	){
+		existing_file
+	} else {
+		return None;
+	};
+	let include_path = include_file.parent().unwrap().to_owned();
+	let directory = include_path.parent().unwrap().to_owned();
 
-	// Launch VS Code LLDB debugger if it is installed and attach to the build script
-	/*let url = format!(
-		"vscode://vadimcn.vscode-lldb/launch/config?{{'request':'attach','pid':{}}}", std::process::id()
+	// Return the installation
+	Some(SlangInstall {
+		directory,
+		include_path_arg: format!("-I{}", include_path.display()),
+		include_path, include_file, lib_type
+	})
+}
+
+///
+fn use_slang_from_system () -> Result<Option<SlangInstall>, Box<dyn std::error::Error>>
+{
+	// Depend on the relevant environment variables
+	println!("cargo:rerun-if-env-changed=SLANG_DIR");
+	//println!("cargo:rerun-if-env-changed=VULKAN_SDK"); // TODO: support getting Slang from Vulkan SDK
+
+	// Try to find an installation
+	if let Ok(slang_dir) = env::var("SLANG_DIR").map(PathBuf::from) {
+		Ok(get_slang_install_at_path(slang_dir, "dylib"))
+	}
+	else {
+		Ok(None)
+	}
+}
+
+///
+fn use_downloaded_slang (out_dir: &Path) -> Result<Option<SlangInstall>, Box<dyn std::error::Error>>
+{
+	// Determine architecture
+	let architecture =
+		     if cfg!(target_arch="x86_64") { "x86_64" }
+		else if cfg!(target_arch="aarch64") { "aarch64" }
+		else { return Err("Unsupported build architecture".into()); };
+
+	// Determine operating system
+	let operating_system =
+		     if cfg!(target_os="linux") { "linux" }
+		else if cfg!(target_os="windows") { "windows" }
+		else if cfg!(target_os="macos") { "macos" }
+		else { return Err("Unsupported build operating system".into()); };
+
+	// Compile package name and URL
+	let package_name = format!(
+		SLANG_PACKAGE_NAME!(), version=SLANG_VERSION, os=operating_system, arch=architecture
 	);
-	if let Ok(result) = std::process::Command::new("code").arg("--open-url").arg(url).output()
-	    && result.status.success() {
-		std::thread::sleep(std::time::Duration::from_secs(4)); // <- give debugger time to attach
-	}*/
+	let package_url = reqwest::Url::parse(
+		format!(SLANG_RELEASE_URL_BASE!(), version=SLANG_VERSION).as_str()
+	)?.join(package_name.as_str())?;
 
-	// Obtain the output directory
-	let out_dir = env::var("OUT_DIR")
-		.map(PathBuf::from)
-		.expect("The output directory must be set by Cargo as an environment variable");
+	// Attempt the download
+	let slang_dir = out_dir.join("slang-install");
+	if depend_on_downloaded_directory(package_url, slang_dir.as_path()).is_ok() {
+		Ok(get_slang_install_at_path(slang_dir, "dylib"))
+	}
+	else {
+		Ok(None)
+	}
+}
 
+///
+fn use_internally_built_slang (out_dir: &Path) -> Result<Option<SlangInstall>, Box<dyn std::error::Error>>
+{
 	// Obtain the target directory
-	let target_dir = get_cargo_target_dir(out_dir.as_path())
-		.expect("The Cargo target directory should be inferrable from OUT_DIR");
-
-
-	////
-	// Configure and build Slang
+	let target_dir = get_cargo_target_dir(out_dir)?;
 
 	// Determine CMake install destination and build type
-	let (cmake_build_type, cmake_install_dest) = match std::env::var("PROFILE")?.as_str() {
+	let (_cmake_build_type, cmake_install_dest) = match std::env::var("PROFILE")?.as_str() {
 		"debug"   => ("Debug", out_dir.join("slang-install")),
 		"release" => ("Release", out_dir.join("slang-install")),
 		profile => {
@@ -262,7 +420,6 @@ fn main () -> Result<(), Box<dyn std::error::Error>>
 	let slang_path = fs::canonicalize("../vendor/slang")
 		.expect("Slang repository must be included as a submodule inside the '/vendor' directory");
 	let slang_lib_type;
-	let bindgen_slang_include_base;
 	match env::var("CARGO_CFG_TARGET_ARCH").expect("Unable to determine target architecture").as_ref()
 	{
 		// WASM is not yet supported
@@ -327,7 +484,7 @@ fn main () -> Result<(), Box<dyn std::error::Error>>
 			if !slang_wasm_release_artifacts_dir.exists() {
 				println!("cargo::error={}", "WASM build did not result in release artifacts in expected place");
 				println!("cargo::error=Expected place: {}", slang_wasm_release_artifacts_dir.display());
-				return Ok(());
+				return Err("WASM build did not result in release artifacts in expected place".into());
 			}
 			copy_recursively(slang_wasm_release_artifacts_dir, cmake_install_dest.as_path())?;
 
@@ -338,7 +495,7 @@ fn main () -> Result<(), Box<dyn std::error::Error>>
 				for entry in fs::read_dir(cmake_install_dest.join("bin"))
 					.expect(
 						"The Slang repository clone should have received a 'build.em/Release/bin' subdirectory"
-				){
+					){
 					let entry = entry.unwrap();
 					if entry.file_type().unwrap().is_file() {
 						fs::copy(entry.path(), target_dir.join(entry.file_name()))
@@ -349,10 +506,6 @@ fn main () -> Result<(), Box<dyn std::error::Error>>
 				};
 			}
 			slang_lib_type = "static";
-
-			// FIXME: also do a native buiĺd so we can use bindgen
-			bindgen_slang_include_base = Path::new("/tmp/slang-native-install");
-			try_build_slang_native(slang_path.as_path(), bindgen_slang_include_base)?;
 		},
 
 		// Native Slang build
@@ -384,40 +537,78 @@ fn main () -> Result<(), Box<dyn std::error::Error>>
 				}
 			}
 			slang_lib_type = "dylib";
-			bindgen_slang_include_base = cmake_install_dest.as_path();
 		}
 	}
+
+	// Collect install info
+	Ok(get_slang_install_at_path(cmake_install_dest, slang_lib_type))
+}
+
+/// Custom build steps – build Slang SDK and handle all additional steps required to make it work on WASM.
+fn main () -> Result<(), Box<dyn std::error::Error>>
+{
+	////
+	// Preamble
+
+	// Launch VS Code LLDB debugger if it is installed and attach to the build script
+	/*let url = format!(
+		"vscode://vadimcn.vscode-lldb/launch/config?{{'request':'attach','pid':{}}}", std::process::id()
+	);
+	if let Ok(result) = std::process::Command::new("code").arg("--open-url").arg(url).output()
+	    && result.status.success() {
+		std::thread::sleep(std::time::Duration::from_secs(4)); // <- give debugger time to attach
+	}*/
+
+	// Obtain the output directory
+	let out_dir = env::var("OUT_DIR")
+		.map(PathBuf::from)
+		.expect("The output directory must be set by Cargo as an environment variable");
+
+
+	////
+	// Get Slang from _somewhere_
+
+	// The first try is always the system Slang
+	let slang_install_option= use_slang_from_system()?;
+
+	// Next attempt: download a binary release from the Slang GitHub repository if the corresponding feature is enabled
+	let slang_install_option =
+		if slang_install_option.is_none() && env::var("CARGO_FEATURE_DOWNLOAD_SLANG_BINARIES").is_ok()
+		{
+			use_downloaded_slang(out_dir.as_path())?
+		}
+		else { slang_install_option };
+
+	// Final attempt: build from source if the corresponding feature is enabled
+	let slang_install_option =
+		if slang_install_option.is_none() && env::var("CARGO_FEATURE_BUILD_SLANG_FROM_SOURCE").is_ok()
+		{
+			use_internally_built_slang(out_dir.as_path())?
+		}
+		else { slang_install_option };
+
+	// Obtained _some_ Slang install, so we can continue
+	let slang_install = slang_install_option.expect(
+		"Unable to find (or download, or build) a usable Slang installation"
+	);
 
 
 	////
 	// Generate bindings
-
-	// Check prerequisites
-	let include_file;
-	let include_path;
-	let include_path_arg;
-	let slang_dir = {
-		include_path = bindgen_slang_include_base.join("include");
-		include_path_arg = format!("-I{}", include_path.display());
-		include_file = include_path.join("slang.h");
-		fs::canonicalize(cmake_install_dest.as_path()).expect(
-			format!("Slang SDK should have been successfully build in '{}'", cmake_install_dest.display()).as_str()
-		)
-	};
 
 	// Setup environment
 	if env::var("CARGO_CFG_TARGET_ARCH").unwrap() == "wasm32" {
 		unsafe {env::set_var("CLANG_PATH", "/opt/SDKs/emscripten/upstream/bin/clang") };
 	}
 
-	link_libraries(&slang_dir, slang_lib_type);
+	link_libraries(&slang_install);
 
 	let mut bindgen_builder = bindgen::builder()
-		.header(slang_dir.join(include_file).to_str().unwrap())
+		.header(slang_install.include_file.to_str().unwrap())
 		.clang_arg("-v")
 		.clang_arg("-xc++")
 		.clang_arg("-std=c++17")
-		.clang_arg(include_path_arg);
+		.clang_arg(slang_install.include_path_arg);
 	if env::var("CARGO_CFG_TARGET_ARCH").unwrap() == "wasm32" {
 		//let clang_include_path_arg = "-I/opt/SDKs/emscripten/upstream/lib/clang/21/include";
 		bindgen_builder = bindgen_builder/*
@@ -451,15 +642,15 @@ fn main () -> Result<(), Box<dyn std::error::Error>>
 	Ok(())
 }
 
-fn link_libraries(slang_dir: &Path, slang_lib_type: &str) {
-	let lib_dir = slang_dir.join("lib");
+fn link_libraries (slang_install: &SlangInstall) {
+	let lib_dir = slang_install.directory.join("lib");
 
 	if !lib_dir.is_dir() {
 		panic!("Couldn't find the `lib` subdirectory in the Slang installation directory.")
 	}
 
 	println!("cargo:rustc-link-search=native={}", lib_dir.display());
-	println!("cargo:rustc-link-lib={slang_lib_type}=slang");
+	println!("cargo:rustc-link-lib={}=slang", slang_install.lib_type);
 }
 
 #[derive(Debug)]
@@ -488,7 +679,8 @@ impl bindgen::callbacks::ParseCallbacks for ParseCallback {
 
 /// Converts `snake_case` or `SNAKE_CASE` to `PascalCase`.
 /// If the input is already in `PascalCase` it will be returned as is.
-fn pascal_case_from_snake_case(snake_case: &str) -> String {
+fn pascal_case_from_snake_case(snake_case: &str) -> String
+{
 	let mut result = String::new();
 
 	let should_lower = snake_case

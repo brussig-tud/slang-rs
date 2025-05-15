@@ -13,7 +13,20 @@ slang-sys = {path="slang-sys"}
 
 [features]
 default = []
+
+## If this feature is enabled, the required *Slang* shared libs will be copied to the binary crate output location of the
+## current build.
 copy_libs = ["slang-sys/copy_libs"]
+
+## If this feature is enabled, download of a matching *Slang* binary release for the current target architecture will be
+## attempted in case the `SLANG_DIR` environment variable does not point to the location of a valid Slang package.
+download_slang_binaries = ["slang-sys/download_slang_binaries"]
+
+## If this feature is enabled, an attempt to build a matching *Slang* binary release from source will be made for the
+## current target architecture *iff* all the following conditions are met:
+## * `SLANG_DIR` environment variable does not point to the location of a valid *Slang* package
+## * if the `download_slang_binaries` feature is enabled, no binary release could be successfully downloaded
+build_slang_from_source = ["slang-sys/build_slang_from_source"]
 
 [workspace]
 members = ["slang-sys"]
