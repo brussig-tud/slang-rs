@@ -18,7 +18,12 @@
 //
 
 // Standard library
-use std::{env, fs, process, fmt::Display, path::{Path, PathBuf}};
+use std::{
+	env, fs, process, fmt::Display, path::{Path, PathBuf}, time::{Duration, SystemTime}, ops::Sub, sync::LazyLock
+};
+
+// Filetime crate
+use fs_set_times::*;
 
 // Reqwest crate
 use reqwest;
@@ -43,6 +48,9 @@ macro_rules! SLANG_RELEASE_URL_BASE {() => {"https://github.com/shader-slang/sla
 /// Evaluates to the pattern according to which *Slang* binary releases are named.
 #[allow(non_snake_case)]
 macro_rules! SLANG_PACKAGE_NAME {() => {"slang-{version}-{os}-{arch}.zip"};}
+
+/// Global storing the `SystemTime` when the build script main functions gained control of execution flow.
+static SCRIPT_START_TIME: LazyLock<SystemTime> = LazyLock::new(|| SystemTime::now().sub(Duration::from_secs(3)));
 
 
 
@@ -167,6 +175,50 @@ fn get_cargo_target_dir(out_dir: &Path) -> Result<PathBuf, Box<dyn std::error::E
 	Ok(target_dir.to_path_buf())
 }
 
+///
+pub fn set_timestamp (path: impl AsRef<Path>, timepoint: SystemTime) -> Result<(), Box<dyn std::error::Error>>
+{
+	if path.as_ref().is_dir() {
+		Ok(set_mtime(path, SystemTimeSpec::from(timepoint))?)
+	}
+	else {
+		let file = fs::File::options().write(true).open(path)?;
+		Ok(file.set_times(fs::FileTimes::new().set_modified(timepoint))?)
+	}
+}
+
+///
+pub fn set_timestamp_with_warning (path: impl AsRef<Path>, timepoint: SystemTime) -> bool
+{
+	if let Err(err) = set_timestamp(path.as_ref(), timepoint) {
+		println!(
+			"cargo::warning=set_timestamp_with_warning: Failed to set timestamp for '{}': {}",
+			path.as_ref().display(), err
+		);
+		false
+	}
+	else { true }
+}
+
+///
+pub fn set_timestamp_recursively (path: impl AsRef<Path>, timepoint: SystemTime)
+	-> Result<bool, Box<dyn std::error::Error>>
+{
+	let mut no_problem = true;
+	for entry in fs::read_dir(path.as_ref())?
+	{
+		let entry = entry?;
+		let filetype = entry.file_type()?;
+		if filetype.is_dir() {
+			no_problem = set_timestamp_recursively(entry.path(), timepoint)? && no_problem;
+		} else {
+			no_problem = set_timestamp_with_warning(entry.path(), timepoint) && no_problem;
+		}
+	}
+	no_problem = set_timestamp_with_warning(path, timepoint) && no_problem;
+	Ok(no_problem)
+}
+
 /// Request from the given URL and return the full response body as a sequence of bytes.
 pub fn download (url: impl reqwest::IntoUrl) -> Result<bytes::Bytes, Box<dyn std::error::Error>> {
 	let dl_response = reqwest::blocking::get(url.as_str())?;
@@ -186,7 +238,8 @@ pub fn download_to_file (url: impl reqwest::IntoUrl, filepath: impl AsRef<crate:
 /// Request an archive file from the given URL and extract its contents (without the root/parent directory if the
 /// archive contains one) to the given path.
 pub fn download_and_extract (url: impl reqwest::IntoUrl, dirpath: impl AsRef<crate::Path>)
--> Result<(), Box<dyn std::error::Error>> {
+	-> Result<(), Box<dyn std::error::Error>>
+{
 	let response_bytes = download(url).or_else(|err| {
 		println!("cargo::error=download_and_extract: Failed to download archive!");
 		println!("cargo::error=download_and_extract: download error: {}", err.as_ref());
@@ -200,6 +253,10 @@ pub fn depend_on_downloaded_file (url: impl reqwest::IntoUrl, filepath: impl AsR
 -> Result<(), Box<dyn std::error::Error>> {
 	println!("cargo::rerun-if-changed={}", filepath.as_ref().display());
 	download_to_file(url, filepath.as_ref())?;
+	if !set_timestamp_with_warning(filepath.as_ref(), *SCRIPT_START_TIME) {
+		println!("cargo::warning=depend_on_downloaded_file: Problem setting time stamp – \
+		          Cargo change detection could fail")
+	}
 	Ok(())
 }
 
@@ -208,6 +265,10 @@ pub fn depend_on_extracted_directory (archive_path: impl AsRef<crate::Path>, dir
 -> Result<(), Box<dyn std::error::Error>> {
 	println!("cargo::rerun-if-changed={}", dirpath.as_ref().display());
 	zip::extract(std::fs::File::open(archive_path.as_ref())?, dirpath.as_ref(), true)?;
+	if !set_timestamp_recursively(dirpath.as_ref(), *SCRIPT_START_TIME)? {
+		println!("cargo::warning=depend_on_extracted_directory: Problem setting time stamps – \
+		          Cargo change detection could fail")
+	}
 	Ok(())
 }
 
@@ -216,6 +277,10 @@ pub fn depend_on_downloaded_directory (url: impl reqwest::IntoUrl, dirpath: impl
 -> Result<(), Box<dyn std::error::Error>> {
 	println!("cargo::rerun-if-changed={}", dirpath.as_ref().display());
 	download_and_extract(url, dirpath.as_ref())?;
+	if !set_timestamp_recursively(dirpath.as_ref(), *SCRIPT_START_TIME)? {
+		println!("cargo::warning=depend_on_downloaded_directory: Problem setting time stamps – \
+		          Cargo change detection could fail")
+	}
 	Ok(())
 }
 
@@ -560,6 +625,9 @@ fn main () -> Result<(), Box<dyn std::error::Error>>
 	////
 	// Preamble
 
+	// Save build script start time for de-confusing Cargo change detection
+	let _ = *SCRIPT_START_TIME;
+
 	// Launch VS Code LLDB debugger if it is installed and attach to the build script
 	/*let url = format!(
 		"vscode://vadimcn.vscode-lldb/launch/config?{{'request':'attach','pid':{}}}", std::process::id()
@@ -653,7 +721,8 @@ fn main () -> Result<(), Box<dyn std::error::Error>>
 	Ok(())
 }
 
-fn link_libraries (slang_install: &SlangInstall) {
+fn link_libraries (slang_install: &SlangInstall)
+{
 	let lib_dir = slang_install.directory.join("lib");
 
 	if !lib_dir.is_dir() {

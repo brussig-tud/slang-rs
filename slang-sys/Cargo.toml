@@ -9,6 +9,7 @@ links = "slang"
 [build-dependencies]
 bindgen = "*"
 reqwest = {version="*", features=["blocking"]}
+fs-set-times = "*"
 zip-extract = "*"
 bytes = "*"
 
