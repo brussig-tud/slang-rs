@@ -198,16 +198,24 @@ pub fn download_and_extract (url: impl reqwest::IntoUrl, dirpath: impl AsRef<cra
 ///
 pub fn depend_on_downloaded_file (url: impl reqwest::IntoUrl, filepath: impl AsRef<crate::Path>)
 -> Result<(), Box<dyn std::error::Error>> {
+	println!("cargo::rerun-if-changed={}", filepath.as_ref().display());
 	download_to_file(url, filepath.as_ref())?;
-	println!("cargo:rerun-if-changed={}", filepath.as_ref().display());
+	Ok(())
+}
+
+///
+pub fn depend_on_extracted_directory (archive_path: impl AsRef<crate::Path>, dirpath: impl AsRef<crate::Path>)
+-> Result<(), Box<dyn std::error::Error>> {
+	println!("cargo::rerun-if-changed={}", dirpath.as_ref().display());
+	zip::extract(std::fs::File::open(archive_path.as_ref())?, dirpath.as_ref(), true)?;
 	Ok(())
 }
 
 ///
 pub fn depend_on_downloaded_directory (url: impl reqwest::IntoUrl, dirpath: impl AsRef<crate::Path>)
 -> Result<(), Box<dyn std::error::Error>> {
+	println!("cargo::rerun-if-changed={}", dirpath.as_ref().display());
 	download_and_extract(url, dirpath.as_ref())?;
-	println!("cargo:rerun-if-changed={}", dirpath.as_ref().display());
 	Ok(())
 }
 
@@ -354,8 +362,8 @@ fn get_slang_install_at_path (slang_install_path: impl AsRef<Path>, lib_type: &'
 fn use_slang_from_system () -> Result<Option<SlangInstall>, Box<dyn std::error::Error>>
 {
 	// Depend on the relevant environment variables
-	println!("cargo:rerun-if-env-changed=SLANG_DIR");
-	//println!("cargo:rerun-if-env-changed=VULKAN_SDK"); // TODO: support getting Slang from Vulkan SDK
+	println!("cargo::rerun-if-env-changed=SLANG_DIR");
+	//println!("cargo::rerun-if-env-changed=VULKAN_SDK"); // TODO: support getting Slang from Vulkan SDK
 
 	// Try to find an installation
 	if let Ok(slang_dir) = env::var("SLANG_DIR").map(PathBuf::from) {
@@ -391,8 +399,10 @@ fn use_downloaded_slang (out_dir: &Path) -> Result<Option<SlangInstall>, Box<dyn
 	)?.join(package_name.as_str())?;
 
 	// Attempt the download
+	let archive_filepath = out_dir.join(package_name);
 	let slang_dir = out_dir.join("slang-install");
-	if depend_on_downloaded_directory(package_url, slang_dir.as_path()).is_ok() {
+	download_to_file(package_url, archive_filepath.as_path())?;
+	if depend_on_extracted_directory(archive_filepath, slang_dir.as_path()).is_ok() {
 		Ok(get_slang_install_at_path(slang_dir, "dylib"))
 	}
 	else {
@@ -639,6 +649,7 @@ fn main () -> Result<(), Box<dyn std::error::Error>>
 		.generate()
 		.expect("Couldn't generate bindings.")
 		.write_to_file(out_dir.join("bindings.rs"))?;
+
 	Ok(())
 }
 
