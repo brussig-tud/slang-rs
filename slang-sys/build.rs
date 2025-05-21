@@ -629,13 +629,14 @@ fn main () -> Result<(), Box<dyn std::error::Error>>
 	let _ = *SCRIPT_START_TIME;
 
 	// Launch VS Code LLDB debugger if it is installed and attach to the build script
-	/*let url = format!(
+	let url = format!(
 		"vscode://vadimcn.vscode-lldb/launch/config?{{'request':'attach','pid':{}}}", std::process::id()
 	);
 	if let Ok(result) = std::process::Command::new("code").arg("--open-url").arg(url).output()
 	    && result.status.success() {
-		std::thread::sleep(std::time::Duration::from_secs(4)); // <- give debugger time to attach
-	}*/
+		std::thread::sleep(std::time::Duration::from_secs(3)); // <- give debugger time to attach
+		//std::intrinsics::breakpoint();
+	}
 
 	// Obtain the output directory
 	let out_dir = env::var("OUT_DIR")
@@ -647,11 +648,15 @@ fn main () -> Result<(), Box<dyn std::error::Error>>
 	// Get Slang from _somewhere_
 
 	// The first try is always the system Slang
-	let slang_install_option= use_slang_from_system()?;
+	let is_wasm = env::var("CARGO_CFG_TARGET_ARCH")? == "wasm32";
+	let slang_install_option = if !is_wasm {
+		use_slang_from_system()?
+	}
+	else { None };
 
 	// Next attempt: download a binary release from the Slang GitHub repository if the corresponding feature is enabled
 	let slang_install_option =
-		if slang_install_option.is_none() && env::var("CARGO_FEATURE_DOWNLOAD_SLANG_BINARIES").is_ok()
+		if slang_install_option.is_none() && !is_wasm && env::var("CARGO_FEATURE_DOWNLOAD_SLANG_BINARIES").is_ok()
 		{
 			use_downloaded_slang(out_dir.as_path())?
 		}
@@ -667,7 +672,10 @@ fn main () -> Result<(), Box<dyn std::error::Error>>
 
 	// Obtained _some_ Slang install, so we can continue
 	let slang_install = slang_install_option.expect(
-		"Unable to find (or download, or build) a usable Slang installation"
+		format!(
+			"Unable to find (or download, or build) a usable Slang installation!{}",
+			if is_wasm {"\nNote that for WASM builds, the feature `build_slang_from_source` MUST be used." } else {""}
+		).as_str()
 	);
 
 
