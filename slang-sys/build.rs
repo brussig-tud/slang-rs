@@ -478,9 +478,6 @@ fn use_downloaded_slang (out_dir: &Path) -> Result<Option<SlangInstall>, Box<dyn
 ///
 fn use_internally_built_slang (out_dir: &Path) -> Result<Option<SlangInstall>, Box<dyn std::error::Error>>
 {
-	// Obtain the target directory
-	let target_dir = get_cargo_target_dir(out_dir)?;
-
 	// Determine CMake install destination and build type
 	let (_cmake_build_type, cmake_install_dest) = match std::env::var("PROFILE")?.as_str() {
 		"debug"   => ("Debug", out_dir.join("slang-install")),
@@ -562,24 +559,6 @@ fn use_internally_built_slang (out_dir: &Path) -> Result<Option<SlangInstall>, B
 				return Err("WASM build did not result in release artifacts in expected place".into());
 			}
 			copy_recursively(slang_wasm_release_artifacts_dir, cmake_install_dest.as_path())?;
-
-			// Copy Slang WASM modules to target dir if requested
-			if env::var("CARGO_FEATURE_COPY_LIBS").is_ok()
-			{
-				// Copy libs
-				for entry in fs::read_dir(cmake_install_dest.join("bin"))
-					.expect(
-						"The Slang repository clone should have received a 'build.em/Release/bin' subdirectory"
-					){
-					let entry = entry.unwrap();
-					if entry.file_type().unwrap().is_file() {
-						fs::copy(entry.path(), target_dir.join(entry.file_name()))
-							.expect(format!(
-								"Failed to copy '{}' to '{}'", entry.path().display(), target_dir.display()
-							).as_str());
-					}
-				};
-			}
 			slang_lib_type = "static";
 		},
 
@@ -587,30 +566,6 @@ fn use_internally_built_slang (out_dir: &Path) -> Result<Option<SlangInstall>, B
 		_ => {
 			// Build and install into $OUT_DIR
 			try_build_slang_native(slang_path.as_path(), cmake_install_dest.as_path())?;
-
-			// Copy libs to target dir if requested
-			if env::var("CARGO_FEATURE_COPY_LIBS").is_ok()
-			{
-				// Copy libs
-				for entry in fs::read_dir(cmake_install_dest.join("lib"))
-					.expect("The Slang installation directory must contain a 'lib' subdirectory")
-				{
-					let entry = entry.unwrap();
-					if entry.file_type().unwrap().is_file() {
-						fs::copy(entry.path(), target_dir.join(entry.file_name()))
-							.expect(format!(
-								"Failed to copy '{}' to '{}'", entry.path().display(), target_dir.display()
-							).as_str());
-					}
-				};
-
-				// Set linker flags accordingly
-				if !env::var("CARGO_CFG_WINDOWS").is_ok() {
-					let link_args = "-Wl,-rpath=$ORIGIN";
-					println!("cargo:rustc-link-arg={link_args}");
-					println!("cargo:REQUIRED_LINK_ARGS={link_args}");
-				}
-			}
 			slang_lib_type = "dylib";
 		}
 	}
@@ -635,13 +590,16 @@ fn main () -> Result<(), Box<dyn std::error::Error>>
 	if let Ok(result) = std::process::Command::new("code").arg("--open-url").arg(url).output()
 	    && result.status.success() {
 		std::thread::sleep(std::time::Duration::from_secs(3)); // <- give debugger time to attach
-		//std::intrinsics::breakpoint();
+		std::intrinsics::breakpoint();
 	}*/
 
 	// Obtain the output directory
 	let out_dir = env::var("OUT_DIR")
 		.map(PathBuf::from)
 		.expect("The output directory must be set by Cargo as an environment variable");
+
+	// Obtain the target directory
+	let target_dir = get_cargo_target_dir(out_dir.as_path())?;
 
 
 	////
@@ -677,6 +635,31 @@ fn main () -> Result<(), Box<dyn std::error::Error>>
 			if is_wasm {"\nNote that for WASM builds, the feature `build_slang_from_source` MUST be used." } else {""}
 		).as_str()
 	);
+
+
+	// Copy libs to target dir if requested
+	if env::var("CARGO_FEATURE_COPY_LIBS").is_ok()
+	{
+		// Copy libs
+		for entry in fs::read_dir(slang_install.directory.join("lib"))
+		    .expect("The Slang installation directory must contain a 'lib' subdirectory")
+		{
+			let entry = entry.unwrap();
+			if entry.file_type().unwrap().is_file() {
+				fs::copy(entry.path(), target_dir.join(entry.file_name()))
+					.expect(format!(
+						"Failed to copy '{}' to '{}'", entry.path().display(), target_dir.display()
+					).as_str());
+			}
+		};
+
+		// Set linker flags accordingly
+		if !env::var("CARGO_CFG_WINDOWS").is_ok() && env::var("CARGO_CFG_TARGET_ARCH").unwrap() != "wasm32" {
+			let link_args = "-Wl,-rpath=$ORIGIN";
+			println!("cargo:rustc-link-arg={link_args}");
+			println!("cargo:REQUIRED_LINK_ARGS={link_args}");
+		}
+	}
 
 
 	////
