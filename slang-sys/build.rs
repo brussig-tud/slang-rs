@@ -50,7 +50,7 @@ macro_rules! SLANG_RELEASE_URL_BASE {() => {"https://github.com/shader-slang/sla
 macro_rules! SLANG_PACKAGE_NAME {() => {"slang-{version}-{os}-{arch}.zip"};}
 
 /// Global storing the `SystemTime` when the build script main functions gained control of execution flow.
-static SCRIPT_START_TIME: LazyLock<SystemTime> = LazyLock::new(|| SystemTime::now().sub(Duration::from_secs(3)));
+static SCRIPT_START_TIME: LazyLock<SystemTime> = LazyLock::new(|| SystemTime::now().sub(Duration::from_secs(5)));
 
 
 
@@ -666,8 +666,10 @@ fn main () -> Result<(), Box<dyn std::error::Error>>
 	// Generate bindings
 
 	// Setup environment
-	if env::var("CARGO_CFG_TARGET_ARCH").unwrap() == "wasm32" {
-		unsafe {env::set_var("CLANG_PATH", "/opt/SDKs/emscripten/upstream/bin/clang") };
+	if env::var("CARGO_CFG_TARGET_ARCH")? == "wasm32" {
+		let emclang_path = env::var("EMSDK").map(PathBuf::from)?.join("upstream/bin/clang");
+		println!("cargo::warning=EMclang: {}", emclang_path.display());
+		unsafe { env::set_var("CLANG_PATH", emclang_path) };
 	}
 
 	link_libraries(&slang_install);
@@ -679,7 +681,10 @@ fn main () -> Result<(), Box<dyn std::error::Error>>
 		.clang_arg("-std=c++17")
 		.clang_arg(slang_install.include_path_arg);
 	if env::var("CARGO_CFG_TARGET_ARCH").unwrap() == "wasm32" {
-		//let clang_include_path_arg = "-I/opt/SDKs/emscripten/upstream/lib/clang/21/include";
+		/*let clang_include_path = env::var("EMSDK").map(PathBuf::from)?.join(
+			"upstream/lib/clang/21/include"
+		).to_string_lossy().into_owned();
+		let clang_include_path_arg = format!("-I{clang_include_path}");*/
 		bindgen_builder = bindgen_builder/*
 			.clang_arg(clang_include_path_arg)
 			.detect_include_paths(true);*/
