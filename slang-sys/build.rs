@@ -479,7 +479,8 @@ fn use_downloaded_slang (out_dir: &Path) -> Result<Option<SlangInstall>, Box<dyn
 fn use_internally_built_slang (out_dir: &Path) -> Result<Option<SlangInstall>, Box<dyn std::error::Error>>
 {
 	// Determine CMake install destination and build type
-	let (_cmake_build_type, cmake_install_dest) = match std::env::var("PROFILE")?.as_str() {
+	let (_cmake_build_type, cmake_install_dest) = match std::env::var("PROFILE")?.as_str()
+	{
 		"debug"   => ("Debug", out_dir.join("slang-install")),
 		"release" => ("Release", out_dir.join("slang-install")),
 		profile => {
@@ -584,9 +585,11 @@ fn main () -> Result<(), Box<dyn std::error::Error>>
 	let _ = *SCRIPT_START_TIME;
 
 	// Sanity checks
-	if    env::var("CARGO_CFG_WINDOWS").is_ok() && !env::var("CARGO_FEATURE_FORCE_ON_WINDOWS").is_ok()
+	let is_windows = env::var("CARGO_CFG_WINDOWS").is_ok();
+	if     is_windows && !env::var("CARGO_FEATURE_FORCE_ON_WINDOWS").is_ok()
 	   && (   env::var("CARGO_FEATURE_DOWNLOAD_SLANG_BINARIES").is_ok()
-	       || env::var("CARGO_FEATURE_BUILD_SLANG_FROM_SOURCE").is_ok()) {
+	       || env::var("CARGO_FEATURE_BUILD_SLANG_FROM_SOURCE").is_ok())
+	{
 		const MSG: &str =
 			"Features `download_slang_binaries` and `build_slang_from_source` are mostly useless on Windows! Use the \
 			`force_on_windows` feature to disable this error (and consult its documentation for more info).";
@@ -640,13 +643,20 @@ fn main () -> Result<(), Box<dyn std::error::Error>>
 		else { slang_install_option };
 
 	// Obtained _some_ Slang install, so we can continue
-	let slang_install = slang_install_option.expect(
-		format!(
-			"Unable to find (or download, or build) a usable Slang installation!{}",
-			if is_wasm {"\nNote that for WASM builds, the feature `build_slang_from_source` MUST be used." } else {""}
-		).as_str()
-	);
-
+	let slang_install = if let Some(slang_install) = slang_install_option { slang_install }
+	else {
+		let msg = format!(
+			"Unable to find (or download, or build) a usable Slang installation!{}{}",
+			if is_windows {
+				" On Windows, the recommended way is to install Slang binaries, point the environment variable \
+				 `SLANG_DIR` to the installation root directory, and making sure that `%SLANG_DIR%\\bin` is in the \
+				  system `PATH`."
+			} else {""},
+			if is_wasm {" Note that for WASM builds, the feature `build_slang_from_source` MUST be used." } else {""}
+		);
+		println!("cargo::error={msg}");
+		return Err(msg.into());
+	};
 
 	// Copy libs to target dir if requested
 	if env::var("CARGO_FEATURE_COPY_LIBS").is_ok()
