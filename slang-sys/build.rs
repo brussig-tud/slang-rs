@@ -584,13 +584,14 @@ fn main () -> Result<(), Box<dyn std::error::Error>>
 	let _ = *SCRIPT_START_TIME;
 
 	// Sanity checks
-	if    env::var("CARGO_CFG_WINDOWS").is_ok() && (env::var("CARGO_FEATURE_DOWNLOAD_SLANG_BINARIES").is_ok()
-	   || env::var("CARGO_FEATURE_BUILD_SLANG_FROM_SOURCE").is_ok()) {
-		println!(
-			"cargo::warning=Features `download_slang_binaries` and `build_slang_from_source`  are  mostly useless on \
-			                Windows because Cargo cannot automatically point  dependent crates to the location of the \
-			                Slang.dll obtained this way!"
-		);
+	if    env::var("CARGO_CFG_WINDOWS").is_ok() && !env::var("CARGO_FEATURE_FORCE_ON_WINDOWS").is_ok()
+	   && (   env::var("CARGO_FEATURE_DOWNLOAD_SLANG_BINARIES").is_ok()
+	       || env::var("CARGO_FEATURE_BUILD_SLANG_FROM_SOURCE").is_ok()) {
+		const MSG: &str =
+			"Features `download_slang_binaries` and `build_slang_from_source` are mostly useless on Windows! Use the \
+			`force_on_windows` feature to disable this error (and consult its documentation for more info).";
+		println!("cargo::error={MSG}");
+		return Err(MSG.into());
 	}
 
 	// Launch VS Code LLDB debugger if it is installed and attach to the build script
@@ -730,7 +731,6 @@ fn main () -> Result<(), Box<dyn std::error::Error>>
 fn link_libraries (slang_install: &SlangInstall)
 {
 	let lib_dir = slang_install.directory.join("lib");
-
 	if !lib_dir.is_dir() {
 		panic!("Couldn't find the `lib` subdirectory in the Slang installation directory.")
 	}
