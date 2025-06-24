@@ -39,7 +39,7 @@ use zip_extract as zip;
 //
 
 /// The *Slang* version this crate is tested against.
-const SLANG_VERSION: &str = "2025.10.4";
+const SLANG_VERSION: &str = "2025.10.5";
 
 /// Evaluates to the pattern according to which the parent URL for *Slang* binary releases is composed.
 #[allow(non_snake_case)]
