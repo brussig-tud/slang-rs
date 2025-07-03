@@ -674,6 +674,25 @@ fn main () -> Result<(), Box<dyn std::error::Error>>
 			}
 		};
 
+		// In case of WASM, copy the output WASM binary and JS/TS bindings
+		if is_wasm {
+			for entry in fs::read_dir(slang_install.directory.join("bin"))
+				.expect("The Slang installation directory must contain a 'bin' subdirectory")
+			{
+				let entry = entry.unwrap();
+				if entry.file_type().unwrap().is_file() {
+					let path = entry.path();
+					let extension = path.extension();
+					if let Some(ext) = extension && (ext=="wasm" || ext=="js" || ext=="ts") {
+						fs::copy(entry.path(), target_dir.join(entry.file_name()))
+							.expect(format!(
+								"Failed to copy '{}' to '{}'", entry.path().display(), target_dir.display()
+							).as_str());
+					}
+				}
+			};
+		}
+
 		// Set linker flags accordingly
 		if !env::var("CARGO_CFG_WINDOWS").is_ok() && env::var("CARGO_CFG_TARGET_ARCH").unwrap() != "wasm32" {
 			let link_args = "-Wl,-rpath=$ORIGIN";
