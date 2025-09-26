@@ -1,10 +1,15 @@
 [package]
-name = "slang-sys"
+name = "shader-slang-sys"
 version = "0.1.0"
 edition = "2024"
-license = "MIT OR Apache-2.0"
+description = "FFI bindings for the Slang shader language compiler"
 publish = false
-links = "slang"
+repository = "https://github.com/brussig-tud/slang-rs.git"
+license = "MIT OR Apache-2.0"
+categories = ["compilers", "external-ffi-bindings"]
+
+[dependencies]
+serde = {version="*", features=["derive"], optional=true}
 
 [build-dependencies]
 bindgen = "*"
@@ -15,6 +20,7 @@ bytes = "*"
 
 [features]
 default = []
+serde = ["dep:serde"]
 copy_libs = []
 download_slang_binaries = []
 build_slang_from_source = []

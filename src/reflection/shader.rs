@@ -1,7 +1,7 @@
 use super::{
-	EntryPoint, Function, Type, TypeLayout, TypeParameter, Variable, VariableLayout, rcall,
+	EntryPoint, Function, Generic, Type, TypeLayout, TypeParameter, Variable, VariableLayout, rcall,
 };
-use slang_sys as sys;
+use crate::{GenericArg, GenericArgType, LayoutRules, sys};
 
 #[repr(transparent)]
 pub struct Shader(sys::SlangReflection);
@@ -16,8 +16,7 @@ impl Shader {
 	}
 
 	pub fn parameters(&self) -> impl ExactSizeIterator<Item = &VariableLayout> {
-		(0..self.parameter_count())
-			.map(move |i| rcall!(spReflection_GetParameterByIndex(self, i) as &VariableLayout))
+		(0..self.parameter_count()).map(|i| self.parameter_by_index(i).unwrap())
 	}
 
 	pub fn type_parameter_count(&self) -> u32 {
@@ -29,8 +28,7 @@ impl Shader {
 	}
 
 	pub fn type_parameters(&self) -> impl ExactSizeIterator<Item = &TypeParameter> {
-		(0..self.type_parameter_count())
-			.map(move |i| rcall!(spReflection_GetTypeParameterByIndex(self, i) as &TypeParameter))
+		(0..self.type_parameter_count()).map(|i| self.type_parameter_by_index(i).unwrap())
 	}
 
 	pub fn find_type_parameter_by_name(&self, name: &str) -> Option<&TypeParameter> {
@@ -47,8 +45,7 @@ impl Shader {
 	}
 
 	pub fn entry_points(&self) -> impl ExactSizeIterator<Item = &EntryPoint> {
-		(0..self.entry_point_count())
-			.map(move |i| rcall!(spReflection_getEntryPointByIndex(self, i as _) as &EntryPoint))
+		(0..self.entry_point_count()).map(|i| self.entry_point_by_index(i).unwrap())
 	}
 
 	pub fn find_entry_point_by_name(&self, name: &str) -> Option<&EntryPoint> {
@@ -90,16 +87,46 @@ impl Shader {
 		)
 	}
 
-	pub fn type_layout(&self, ty: &Type, rules: sys::SlangLayoutRules) -> Option<&TypeLayout> {
+	pub fn type_layout(&self, ty: &Type, rules: LayoutRules) -> Option<&TypeLayout> {
 		rcall!(
 			spReflection_GetTypeLayout(self, ty as *const _ as *mut _, rules)
 				as Option<&TypeLayout>
 		)
 	}
 
-	// TODO: specialize_type
-	// TODO: specialize_generic
-	// TODO: is_sub_type
+	pub fn specialize_type(&self, ty: &Type, specialization_args: &[&Type]) -> Option<&TypeLayout> {
+		rcall!(spReflection_specializeType(
+			self,
+			ty as *const _ as *mut _,
+			specialization_args.len() as i64,
+			specialization_args.as_ptr() as *mut _,
+			std::ptr::null_mut()
+		) as Option<&TypeLayout>)
+	}
+
+	pub fn specialize_generic(
+		&self,
+		generic: &Generic,
+		specialization_arg_types: &[GenericArgType],
+		specialization_arg_vals: &[GenericArg],
+	) -> Option<&Generic> {
+		rcall!(spReflection_specializeGeneric(
+			self,
+			generic as *const _ as *mut _,
+			specialization_arg_types.len() as i64,
+			specialization_arg_types.as_ptr() as *mut _,
+			specialization_arg_vals.as_ptr() as *mut _,
+			std::ptr::null_mut()
+		) as Option<&Generic>)
+	}
+
+	pub fn is_sub_type(&self, sub_type: &Type, super_type: &Type) -> bool {
+		rcall!(spReflection_isSubType(
+			self,
+			sub_type as *const _ as *mut _,
+			super_type as *const _ as *mut _
+		))
+	}
 
 	pub fn hashed_string_count(&self) -> u64 {
 		rcall!(spReflection_getHashedStringCount(self))
@@ -115,15 +142,15 @@ impl Shader {
 		})
 	}
 
-	pub fn global_params_type_layout(&self) -> &TypeLayout {
-		rcall!(spReflection_getGlobalParamsTypeLayout(self) as &TypeLayout)
+	pub fn hashed_strings(&self) -> impl ExactSizeIterator<Item = &str> {
+		(0..self.hashed_string_count() as usize).map(|i| self.hashed_string(i as u64).unwrap())
 	}
 
-	pub fn global_params_var_layout(&self) -> &VariableLayout {
-		rcall!(spReflection_getGlobalParamsVarLayout(self) as &VariableLayout)
+	pub fn global_params_type_layout(&self) -> Option<&TypeLayout> {
+		rcall!(spReflection_getGlobalParamsTypeLayout(self) as Option<&TypeLayout>)
 	}
-}
 
-pub fn compute_string_hash(string: &str) -> u32 {
-	rcall!(spComputeStringHash(string, string.len()))
+	pub fn global_params_var_layout(&self) -> Option<&VariableLayout> {
+		rcall!(spReflection_getGlobalParamsVarLayout(self) as Option<&VariableLayout>)
+	}
 }

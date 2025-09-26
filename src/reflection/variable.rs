@@ -1,20 +1,21 @@
-use super::{Type, TypeLayout, UserAttribute, rcall};
-use slang_sys as sys;
+use super::{Generic, Type, UserAttribute, rcall};
+use crate::{GlobalSession, Modifier, ModifierID, succeeded, sys};
 
 #[repr(transparent)]
 pub struct Variable(sys::SlangReflectionVariable);
 
 impl Variable {
-	pub fn name(&self) -> &str {
-		let name = rcall!(spReflectionVariable_GetName(self));
-		unsafe { std::ffi::CStr::from_ptr(name).to_str().unwrap() }
+	pub fn name(&self) -> Option<&str> {
+		rcall!(spReflectionVariable_GetName(self) as Option<&str>)
 	}
 
-	pub fn ty(&self) -> &Type {
-		rcall!(spReflectionVariable_GetType(self) as &Type)
+	pub fn ty(&self) -> Option<&Type> {
+		rcall!(spReflectionVariable_GetType(self) as Option<&Type>)
 	}
 
-	// TODO: find_modifier
+	pub fn find_modifier(&self, id: ModifierID) -> Option<&Modifier> {
+		rcall!(spReflectionVariable_FindModifier(self, id) as Option<&Modifier>)
+	}
 
 	pub fn user_attribute_count(&self) -> u32 {
 		rcall!(spReflectionVariable_GetUserAttributeCount(self))
@@ -25,81 +26,40 @@ impl Variable {
 	}
 
 	pub fn user_attributes(&self) -> impl ExactSizeIterator<Item = &UserAttribute> {
-		(0..self.user_attribute_count())
-			.map(move |i| rcall!(spReflectionVariable_GetUserAttribute(self, i) as &UserAttribute))
+		(0..self.user_attribute_count()).map(|i| self.user_attribute_by_index(i).unwrap())
 	}
 
-	// TODO: find_user_attribute_by_name
+	pub fn find_user_attribute_by_name(
+		&self,
+		global_session: &GlobalSession,
+		name: &str,
+	) -> Option<&UserAttribute> {
+		let name = std::ffi::CString::new(name).unwrap();
+		rcall!(spReflectionVariable_FindUserAttributeByName(
+			self,
+			global_session as *const _ as *mut _,
+			name.as_ptr()
+		) as Option<&UserAttribute>)
+	}
 
 	pub fn has_default_value(&self) -> bool {
 		rcall!(spReflectionVariable_HasDefaultValue(self))
 	}
 
-	// TODO: generic_container
-	// TODO: apply_specializations
-}
-
-#[repr(transparent)]
-pub struct VariableLayout(sys::SlangReflectionVariableLayout);
-
-impl VariableLayout {
-	pub fn variable(&self) -> Option<&Variable> {
-		rcall!(spReflectionVariableLayout_GetVariable(self) as Option<&Variable>)
+	pub fn default_value_int(&self) -> Option<i64> {
+		let mut value = 0;
+		let result = rcall!(spReflectionVariable_GetDefaultValueInt(self, &mut value));
+		if succeeded(result) { Some(value) } else { None }
 	}
 
-	// TODO: get_name
-	// TODO: find_modifier
-
-	pub fn type_layout(&self) -> &TypeLayout {
-		rcall!(spReflectionVariableLayout_GetTypeLayout(self) as &TypeLayout)
+	pub fn generic_container(&self) -> Option<&Generic> {
+		rcall!(spReflectionVariable_GetGenericContainer(self) as Option<&Generic>)
 	}
 
-	pub fn category(&self) -> sys::SlangParameterCategory {
-		self.type_layout().parameter_category()
-	}
-
-	pub fn category_count(&self) -> u32 {
-		self.type_layout().category_count()
-	}
-
-	pub fn category_by_index(&self, index: u32) -> sys::SlangParameterCategory {
-		self.type_layout().category_by_index(index)
-	}
-
-	pub fn offset(&self, category: sys::SlangParameterCategory) -> usize {
-		rcall!(spReflectionVariableLayout_GetOffset(self, category))
-	}
-
-	pub fn ty(&self) -> Option<&Type> {
-		Some(self.variable()?.ty())
-	}
-
-	pub fn binding_index(&self) -> u32 {
-		rcall!(spReflectionParameter_GetBindingIndex(self))
-	}
-
-	pub fn binding_space(&self) -> u32 {
-		rcall!(spReflectionParameter_GetBindingSpace(self))
-	}
-
-	pub fn binding_space_with_category(&self, category: sys::SlangParameterCategory) -> usize {
-		rcall!(spReflectionVariableLayout_GetSpace(self, category))
-	}
-
-	pub fn semantic_name(&self) -> Option<&str> {
-		let name = rcall!(spReflectionVariableLayout_GetSemanticName(self));
-		unsafe { (!name.is_null()).then(|| std::ffi::CStr::from_ptr(name).to_str().unwrap()) }
-	}
-
-	pub fn semantic_index(&self) -> usize {
-		rcall!(spReflectionVariableLayout_GetSemanticIndex(self))
-	}
-
-	pub fn stage(&self) -> sys::SlangStage {
-		rcall!(spReflectionVariableLayout_getStage(self))
-	}
-
-	pub fn pending_data_layout(&self) -> &VariableLayout {
-		rcall!(spReflectionVariableLayout_getPendingDataLayout(self) as &VariableLayout)
+	pub fn apply_specializations(&self, generic: &Generic) -> Option<&Variable> {
+		rcall!(
+			spReflectionVariable_applySpecializations(self, generic as *const _ as *mut _)
+				as Option<&Variable>
+		)
 	}
 }

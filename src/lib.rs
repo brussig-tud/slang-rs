@@ -1,3 +1,5 @@
+//! Rust bindings for the Slang shader language compiler
+
 pub mod reflection;
 
 #[cfg(test)]
@@ -7,17 +9,20 @@ use std::ffi::{CStr, CString};
 use std::marker::PhantomData;
 use std::ptr::{null, null_mut};
 
-use slang_sys as sys;
+pub(crate) use shader_slang_sys as sys;
 
 pub use sys::{
 	SlangBindingType as BindingType, SlangCompileTarget as CompileTarget,
-	SlangDebugInfoLevel as DebugInfoLevel, SlangFloatingPointMode as FloatingPointMode,
-	SlangImageFormat as ImageFormat, SlangLineDirectiveMode as LineDirectiveMode,
-	SlangMatrixLayoutMode as MatrixLayoutMode, SlangOptimizationLevel as OptimizationLevel,
-	SlangParameterCategory as ParameterCategory, SlangResourceAccess as ResourceAccess,
-	SlangResourceShape as ResourceShape, SlangScalarType as ScalarType,
-	SlangSourceLanguage as SourceLanguage, SlangStage as Stage, SlangTypeKind as TypeKind,
-	SlangUUID as UUID, slang_CompilerOptionName as CompilerOptionName,
+	SlangDebugInfoLevel as DebugInfoLevel, SlangDeclKind as DeclKind,
+	SlangFloatingPointMode as FloatingPointMode, SlangImageFormat as ImageFormat,
+	SlangLayoutRules as LayoutRules, SlangLineDirectiveMode as LineDirectiveMode,
+	SlangMatrixLayoutMode as MatrixLayoutMode, SlangModifierID as ModifierID,
+	SlangOptimizationLevel as OptimizationLevel, SlangParameterCategory as ParameterCategory,
+	SlangReflectionGenericArg as GenericArg, SlangReflectionGenericArgType as GenericArgType,
+	SlangResourceAccess as ResourceAccess, SlangResourceShape as ResourceShape,
+	SlangScalarType as ScalarType, SlangSourceLanguage as SourceLanguage, SlangStage as Stage,
+	SlangTypeKind as TypeKind, SlangUUID as UUID, slang_CompilerOptionName as CompilerOptionName,
+	slang_Modifier as Modifier,
 };
 
 macro_rules! vcall {
@@ -55,6 +60,8 @@ impl std::fmt::Display for Error {
 	}
 }
 
+unsafe impl Send for Error {}
+unsafe impl Sync for Error {}
 impl std::error::Error for Error {}
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -75,16 +82,26 @@ fn result_from_blob(code: sys::SlangResult, blob: *mut sys::slang_IBlob) -> Resu
 	}
 }
 
+#[derive(Clone, Copy)]
 pub struct ProfileID(sys::SlangProfileID);
 
 impl ProfileID {
 	pub const UNKNOWN: ProfileID = ProfileID(sys::SlangProfileID_SlangProfileUnknown);
+
+	pub fn is_unknown(&self) -> bool {
+		self.0 == sys::SlangProfileID_SlangProfileUnknown
+	}
 }
 
+#[derive(Clone, Copy)]
 pub struct CapabilityID(sys::SlangCapabilityID);
 
 impl CapabilityID {
 	pub const UNKNOWN: CapabilityID = CapabilityID(sys::SlangCapabilityID_SlangCapabilityUnknown);
+
+	pub fn is_unknown(&self) -> bool {
+		self.0 == sys::SlangCapabilityID_SlangCapabilityUnknown
+	}
 }
 
 unsafe trait Interface: Sized {
@@ -216,6 +233,11 @@ impl GlobalSession {
 		let name = CString::new(name).unwrap();
 		CapabilityID(vcall!(self, findCapability(name.as_ptr())))
 	}
+
+	pub fn build_tag_string(&self) -> &str {
+		let tag = vcall!(self, getBuildTagString());
+		unsafe { CStr::from_ptr(tag).to_str().unwrap() }
+	}
 }
 
 #[repr(transparent)]
@@ -238,6 +260,71 @@ impl Session {
 		let mut diagnostics = null_mut();
 
 		let module = vcall!(self, loadModule(name.as_ptr(), &mut diagnostics));
+
+		if module.is_null() {
+			let blob = Blob(IUnknown(
+				std::ptr::NonNull::new(diagnostics as *mut _).unwrap(),
+			));
+			Err(Error::Blob(blob))
+		} else {
+			let module = Module(IUnknown(std::ptr::NonNull::new(module as *mut _).unwrap()));
+			unsafe { (module.as_unknown().vtable().ISlangUnknown_addRef)(module.as_raw()) };
+			Ok(module)
+		}
+	}
+
+	pub fn load_module_from_source_string(
+		&self,
+		module_name: &str,
+		path: &str,
+		source: &str,
+	) -> Result<Module> {
+		let module_name = CString::new(module_name).unwrap();
+		let path = CString::new(path).unwrap();
+		let source = CString::new(source).unwrap();
+		let mut diagnostics = null_mut();
+
+		let module = vcall!(
+			self,
+			loadModuleFromSourceString(
+				module_name.as_ptr(),
+				path.as_ptr(),
+				source.as_ptr(),
+				&mut diagnostics
+			)
+		);
+
+		if module.is_null() {
+			let blob = Blob(IUnknown(
+				std::ptr::NonNull::new(diagnostics as *mut _).unwrap(),
+			));
+			Err(Error::Blob(blob))
+		} else {
+			let module = Module(IUnknown(std::ptr::NonNull::new(module as *mut _).unwrap()));
+			unsafe { (module.as_unknown().vtable().ISlangUnknown_addRef)(module.as_raw()) };
+			Ok(module)
+		}
+	}
+
+	pub fn load_module_from_ir_blob(
+		&self,
+		module_name: &str,
+		path: &str,
+		ir_blob: &Blob,
+	) -> Result<Module> {
+		let module_name = CString::new(module_name).unwrap();
+		let path = CString::new(path).unwrap();
+		let mut diagnostics = null_mut();
+
+		let module = vcall!(
+			self,
+			loadModuleFromIRBlob(
+				module_name.as_ptr(),
+				path.as_ptr(),
+				ir_blob.as_raw(),
+				&mut diagnostics
+			)
+		);
 
 		if module.is_null() {
 			let blob = Blob(IUnknown(
@@ -299,11 +386,11 @@ impl Metadata {
 		register_index: u64,
 	) -> Option<bool> {
 		let mut used = false;
-		let res = vcall!(
+		let result = vcall!(
 			self,
 			isParameterLocationUsed(category, space_index, register_index, &mut used)
 		);
-		succeeded(res).then(|| used)
+		succeeded(result).then(|| used)
 	}
 }
 
@@ -514,7 +601,7 @@ impl Module {
 	}
 
 	pub fn entry_points(&self) -> impl ExactSizeIterator<Item = EntryPoint> {
-		(0..self.entry_point_count()).map(move |i| self.entry_point_by_index(i).unwrap())
+		(0..self.entry_point_count()).map(|i| self.entry_point_by_index(i).unwrap())
 	}
 
 	pub fn name(&self) -> &str {
@@ -542,7 +629,7 @@ impl Module {
 	}
 
 	pub fn dependency_file_paths(&self) -> impl ExactSizeIterator<Item = &str> {
-		(0..self.dependency_file_count()).map(move |i| self.dependency_file_path(i))
+		(0..self.dependency_file_count()).map(|i| self.dependency_file_path(i))
 	}
 
 	pub fn module_reflection(&self) -> &reflection::Decl {

@@ -1,17 +1,16 @@
-use super::{Type, UserAttribute, Variable, rcall};
-use slang_sys as sys;
+use super::{Generic, Type, UserAttribute, Variable, rcall};
+use crate::{GlobalSession, Modifier, ModifierID, sys};
 
 #[repr(transparent)]
 pub struct Function(sys::SlangReflectionFunction);
 
 impl Function {
-	pub fn name(&self) -> &str {
-		let name = rcall!(spReflectionFunction_GetName(self));
-		unsafe { std::ffi::CStr::from_ptr(name).to_str().unwrap() }
+	pub fn name(&self) -> Option<&str> {
+		rcall!(spReflectionFunction_GetName(self) as Option<&str>)
 	}
 
-	pub fn return_type(&self) -> &Type {
-		rcall!(spReflectionFunction_GetResultType(self) as &Type)
+	pub fn return_type(&self) -> Option<&Type> {
+		rcall!(spReflectionFunction_GetResultType(self) as Option<&Type>)
 	}
 
 	pub fn parameter_count(&self) -> u32 {
@@ -23,8 +22,7 @@ impl Function {
 	}
 
 	pub fn parameters(&self) -> impl ExactSizeIterator<Item = &Variable> {
-		(0..self.parameter_count())
-			.map(move |i| rcall!(spReflectionFunction_GetParameter(self, i) as &Variable))
+		(0..self.parameter_count()).map(|i| self.parameter_by_index(i).unwrap())
 	}
 
 	pub fn user_attribute_count(&self) -> u32 {
@@ -36,15 +34,44 @@ impl Function {
 	}
 
 	pub fn user_attributes(&self) -> impl ExactSizeIterator<Item = &UserAttribute> {
-		(0..self.user_attribute_count())
-			.map(move |i| rcall!(spReflectionFunction_GetUserAttribute(self, i) as &UserAttribute))
+		(0..self.user_attribute_count()).map(|i| self.user_attribute_by_index(i).unwrap())
 	}
 
-	// TODO: find_user_attribute_by_name
-	// TODO: find_modifier
-	// TODO: generic_container
-	// TODO: apply_specializations
-	// TODO: specialize_with_arg_types
+	pub fn find_user_attribute_by_name(
+		&self,
+		global_session: &GlobalSession,
+		name: &str,
+	) -> Option<&UserAttribute> {
+		let name = std::ffi::CString::new(name).unwrap();
+		rcall!(spReflectionFunction_FindUserAttributeByName(
+			self,
+			global_session as *const _ as *mut _,
+			name.as_ptr()
+		) as Option<&UserAttribute>)
+	}
+
+	pub fn find_modifier(&self, id: ModifierID) -> Option<&Modifier> {
+		rcall!(spReflectionFunction_FindModifier(self, id) as Option<&Modifier>)
+	}
+
+	pub fn generic_container(&self) -> Option<&Generic> {
+		rcall!(spReflectionFunction_GetGenericContainer(self) as Option<&Generic>)
+	}
+
+	pub fn apply_specializations(&self, generic: &Generic) -> Option<&Function> {
+		rcall!(
+			spReflectionFunction_applySpecializations(self, generic as *const _ as *mut _)
+				as Option<&Function>
+		)
+	}
+
+	pub fn specialize_with_arg_types(&self, types: &[&Type]) -> Option<&Function> {
+		rcall!(spReflectionFunction_specializeWithArgTypes(
+			self,
+			types.len() as i64,
+			types.as_ptr() as *mut _
+		) as Option<&Function>)
+	}
 
 	pub fn is_overloaded(&self) -> bool {
 		rcall!(spReflectionFunction_isOverloaded(self))
@@ -59,7 +86,6 @@ impl Function {
 	}
 
 	pub fn overloads(&self) -> impl ExactSizeIterator<Item = &Function> {
-		(0..self.overload_count())
-			.map(move |i| rcall!(spReflectionFunction_getOverload(self, i) as &Function))
+		(0..self.overload_count()).map(|i| self.overload_by_index(i).unwrap())
 	}
 }

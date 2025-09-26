@@ -1,34 +1,40 @@
 [package]
-name = "slang"
+name = "shader-slang"
 version = "0.1.0"
 edition = "2024"
-license = "MIT OR Apache-2.0"
+description = "Rust bindings for the Slang shader language compiler"
 publish = false
+repository = "https://github.com/brussig-tud/slang-rs.git"
+license = "MIT OR Apache-2.0"
+categories = ["compilers", "api-bindings"]
 
 [profile.dev.build-override]
 debug = true
 
 [dependencies]
-slang-sys = {path="slang-sys"}
+shader-slang-sys = {path="slang-sys", version="0.1.0"}
 
 [features]
 default = []
 
+## Add serde support to many API objects
+serde = ["shader-slang-sys/serde"]
+
 ## If this feature is enabled, the required *Slang* shared libs will be copied to the binary crate output location of the
 ## current build.
-copy_libs = ["slang-sys/copy_libs"]
+copy_libs = ["shader-slang-sys/copy_libs"]
 
 ## If this feature is enabled, download of a matching *Slang* binary release for the current target architecture will be
 ## attempted in case the `SLANG_DIR` environment variable does not point to the location of a valid Slang package.
 ## This feature is problematic on Windows (see `force_on_windows` below)
-download_slang_binaries = ["slang-sys/download_slang_binaries"]
+download_slang_binaries = ["shader-slang-sys/download_slang_binaries"]
 
 ## If this feature is enabled, an attempt to build a matching *Slang* binary release from source will be made for the
 ## current target architecture *iff* all the following conditions are met:
 ## * `SLANG_DIR` environment variable does not point to the location of a valid *Slang* package
 ## * if the `download_slang_binaries` feature is enabled, no binary release could be successfully downloaded. This
 ### This feature is problematic on Windows (see `force_on_windows` below)
-build_slang_from_source = ["slang-sys/build_slang_from_source"]
+build_slang_from_source = ["shader-slang-sys/build_slang_from_source"]
 
 ## On Windows, enabling the `download_slang_binaries` or `build_slang_from_source` features will stop the build process
 ## with an error unless this feature is also enabled (it is ignored on all other platforms). Those features work per se,
@@ -40,7 +46,7 @@ build_slang_from_source = ["slang-sys/build_slang_from_source"]
 ##
 ## Cargo provides no means of implementing either option while staying in the realm of proper and portable usage. With
 ## ridiculous hackery it's potentially possible, but too unfeasible to attempt (for now).
-force_on_windows = ["slang-sys/force_on_windows"]
+force_on_windows = ["shader-slang-sys/force_on_windows"]
 
 [workspace]
 members = ["slang-sys"]
