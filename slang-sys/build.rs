@@ -29,7 +29,7 @@ use fs_set_times::*;
 use reqwest;
 
 // Zip-extract crate
-use zip_extract as zip;
+use zip;
 
 
 
@@ -245,7 +245,7 @@ pub fn download_and_extract (url: impl reqwest::IntoUrl, dirpath: impl AsRef<cra
 		println!("cargo::error=download_and_extract: download error: {}", err.as_ref());
 		Err(err)
 	})?;
-	Ok(zip::extract(std::io::Cursor::new(response_bytes), dirpath.as_ref(), true)?)
+	Ok(zip::ZipArchive::new(std::io::Cursor::new(response_bytes))?.extract(dirpath.as_ref())?)
 }
 
 ///
@@ -264,7 +264,7 @@ pub fn depend_on_downloaded_file (url: impl reqwest::IntoUrl, filepath: impl AsR
 pub fn depend_on_extracted_directory (archive_path: impl AsRef<crate::Path>, dirpath: impl AsRef<crate::Path>)
 -> Result<(), Box<dyn std::error::Error>> {
 	println!("cargo::rerun-if-changed={}", dirpath.as_ref().display());
-	zip::extract(std::fs::File::open(archive_path.as_ref())?, dirpath.as_ref(), true)?;
+	zip::ZipArchive::new(fs::File::open(archive_path.as_ref())?)?.extract(dirpath.as_ref())?;
 	if !set_timestamp_recursively(dirpath.as_ref(), *SCRIPT_START_TIME)? {
 		println!("cargo::warning=depend_on_extracted_directory: Problem setting time stamps – \
 		          Cargo change detection could fail")
