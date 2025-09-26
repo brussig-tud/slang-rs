@@ -26,9 +26,11 @@ use std::{
 use fs_set_times::*;
 
 // Reqwest crate
+#[cfg(feature="download_slang_binaries")]
 use reqwest;
 
 // Zip-extract crate
+#[cfg(feature="download_slang_binaries")]
 use zip;
 
 
@@ -39,13 +41,16 @@ use zip;
 //
 
 /// The *Slang* version this crate is tested against.
+#[allow(dead_code)] // <- we only need this for the download feature, but want to keep it anyway as it's important info
 const SLANG_VERSION: &str = "2025.14.3";
 
 /// Evaluates to the pattern according to which the parent URL for *Slang* binary releases is composed.
+#[cfg(feature="download_slang_binaries")]
 #[allow(non_snake_case)]
 macro_rules! SLANG_RELEASE_URL_BASE {() => {"https://github.com/shader-slang/slang/releases/download/v{version}/"};}
 
 /// Evaluates to the pattern according to which *Slang* binary releases are named.
+#[cfg(feature="download_slang_binaries")]
 #[allow(non_snake_case)]
 macro_rules! SLANG_PACKAGE_NAME {() => {"slang-{version}-{os}-{arch}.zip"};}
 
@@ -101,6 +106,7 @@ impl Display for NotStringRepresentableError {
 impl std::error::Error for NotStringRepresentableError {}
 
 /// A simple error indicating that a web request did not result in a `200 OK` response.
+#[cfg(feature="download_slang_binaries")]
 #[derive(Debug)]
 pub struct HttpResponseNotOkError {
 	/// The URL of the request that did not respond with `200 OK`.
@@ -109,17 +115,20 @@ pub struct HttpResponseNotOkError {
 	/// The full response of the request that did not respond with `200 OK`.
 	pub response: reqwest::blocking::Response
 }
+#[cfg(feature="download_slang_binaries")]
 impl HttpResponseNotOkError {
 	/// Create a new instance for the given `url` and `response`.o
 	pub fn new (url: impl Into<String>, response: reqwest::blocking::Response) -> Self { Self {
 		url: url.into(), response
 	}}
 }
+#[cfg(feature="download_slang_binaries")]
 impl Display for HttpResponseNotOkError {
 	fn fmt (&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
 		write!(formatter, "HttpResponseNotOkError[`{}`<-{}]", self.response.status(), self.url)
 	}
 }
+#[cfg(feature="download_slang_binaries")]
 impl std::error::Error for HttpResponseNotOkError {}
 
 
@@ -220,6 +229,7 @@ pub fn set_timestamp_recursively (path: impl AsRef<Path>, timepoint: SystemTime)
 }
 
 /// Request from the given URL and return the full response body as a sequence of bytes.
+#[cfg(feature="download_slang_binaries")]
 pub fn download (url: impl reqwest::IntoUrl) -> Result<bytes::Bytes, Box<dyn std::error::Error>> {
 	let dl_response = reqwest::blocking::get(url.as_str())?;
 	if dl_response.status() != reqwest::StatusCode::OK {
@@ -229,6 +239,7 @@ pub fn download (url: impl reqwest::IntoUrl) -> Result<bytes::Bytes, Box<dyn std
 }
 
 /// Request from the given URL and store the response body in the given file.
+#[cfg(feature="download_slang_binaries")]
 pub fn download_to_file (url: impl reqwest::IntoUrl, filepath: impl AsRef<crate::Path>)
 -> Result<(), Box<dyn std::error::Error>> {
 	let response_bytes = download(url)?;
@@ -237,6 +248,7 @@ pub fn download_to_file (url: impl reqwest::IntoUrl, filepath: impl AsRef<crate:
 
 /// Request an archive file from the given URL and extract its contents (without the root/parent directory if the
 /// archive contains one) to the given path.
+#[cfg(feature="download_slang_binaries")]
 pub fn download_and_extract (url: impl reqwest::IntoUrl, dirpath: impl AsRef<crate::Path>)
 	-> Result<(), Box<dyn std::error::Error>>
 {
@@ -249,6 +261,7 @@ pub fn download_and_extract (url: impl reqwest::IntoUrl, dirpath: impl AsRef<cra
 }
 
 ///
+#[cfg(feature="download_slang_binaries")]
 pub fn depend_on_downloaded_file (url: impl reqwest::IntoUrl, filepath: impl AsRef<crate::Path>)
 -> Result<(), Box<dyn std::error::Error>> {
 	println!("cargo::rerun-if-changed={}", filepath.as_ref().display());
@@ -261,6 +274,7 @@ pub fn depend_on_downloaded_file (url: impl reqwest::IntoUrl, filepath: impl AsR
 }
 
 ///
+#[cfg(feature="download_slang_binaries")]
 pub fn depend_on_extracted_directory (archive_path: impl AsRef<crate::Path>, dirpath: impl AsRef<crate::Path>)
 -> Result<(), Box<dyn std::error::Error>> {
 	println!("cargo::rerun-if-changed={}", dirpath.as_ref().display());
@@ -273,6 +287,7 @@ pub fn depend_on_extracted_directory (archive_path: impl AsRef<crate::Path>, dir
 }
 
 ///
+#[cfg(feature="download_slang_binaries")]
 pub fn depend_on_downloaded_directory (url: impl reqwest::IntoUrl, dirpath: impl AsRef<crate::Path>)
 -> Result<(), Box<dyn std::error::Error>> {
 	println!("cargo::rerun-if-changed={}", dirpath.as_ref().display());
@@ -440,6 +455,7 @@ fn use_slang_from_system () -> Result<Option<SlangInstall>, Box<dyn std::error::
 }
 
 ///
+#[cfg(feature="download_slang_binaries")]
 fn use_downloaded_slang (out_dir: &Path) -> Result<Option<SlangInstall>, Box<dyn std::error::Error>>
 {
 	// Determine architecture
@@ -627,6 +643,7 @@ fn main () -> Result<(), Box<dyn std::error::Error>>
 	else { None };
 
 	// Next attempt: download a binary release from the Slang GitHub repository if the corresponding feature is enabled
+	#[cfg(feature="download_slang_binaries")]
 	let slang_install_option =
 		if slang_install_option.is_none() && !is_wasm && env::var("CARGO_FEATURE_DOWNLOAD_SLANG_BINARIES").is_ok()
 		{

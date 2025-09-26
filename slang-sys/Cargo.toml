@@ -13,15 +13,15 @@ serde = {version="*", features=["derive"], optional=true}
 
 [build-dependencies]
 bindgen = "*"
-reqwest = {version="*", features=["blocking"]}
+reqwest = {version="*", features=["blocking"], optional=true}
 fs-set-times = "*"
-zip = "*"
+zip = {version="*", optional=true}
 bytes = "*"
 
 [features]
 default = []
 serde = ["dep:serde"]
 copy_libs = []
-download_slang_binaries = []
+download_slang_binaries = ["dep:reqwest","dep:zip"]
 build_slang_from_source = []
 force_on_windows = []
