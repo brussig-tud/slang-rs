@@ -604,6 +604,30 @@ impl Module {
 		(0..self.entry_point_count()).map(|i| self.entry_point_by_index(i).unwrap())
 	}
 
+	pub fn serialize(&self) -> Result<Blob> {
+		let mut out_blob = null_mut();
+		let status_code = vcall!(self, serialize(&mut out_blob));
+		if status_code == 0 {
+			Ok(Blob(IUnknown(std::ptr::NonNull::new(out_blob as *mut _).expect(
+				"Slang returned a null pointer despite reporting success"
+			))))
+		} else {
+			Err(Error::Code(status_code))
+		}
+	}
+
+	pub fn write_to_file(&self, filename: impl AsRef<std::path::Path>) -> Result<()> {
+		let filename = CString::new(
+			filename.as_ref().to_str().expect("filename argument must be CString-representable")
+		).unwrap();
+		let status_code = vcall!(self, writeToFile(filename.as_ptr()));
+		if status_code == 0 {
+			Ok(())
+		} else {
+			Err(Error::Code(status_code))
+		}
+	}
+
 	pub fn name(&self) -> &str {
 		let name = vcall!(self, getName());
 		unsafe { CStr::from_ptr(name).to_str().unwrap() }
