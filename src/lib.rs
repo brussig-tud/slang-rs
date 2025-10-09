@@ -2,6 +2,11 @@
 
 pub mod reflection;
 
+#[cfg(feature="com_impls")]
+mod com_impls;
+#[cfg(feature="com_impls")]
+pub use com_impls::{ComPtr, VecBlob};
+
 #[cfg(test)]
 mod tests;
 
@@ -104,7 +109,7 @@ impl CapabilityID {
 	}
 }
 
-unsafe trait Interface: Sized {
+pub unsafe trait Interface: Sized {
 	type Vtable;
 	const IID: UUID;
 
