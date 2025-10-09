@@ -775,7 +775,7 @@ macro_rules! option {
 	};
 }
 
-#[derive(Default)]
+#[derive(Default,Clone)]
 pub struct CompilerOptions {
 	strings: Vec<CString>,
 	options: Vec<sys::slang_CompilerOptionEntry>,
