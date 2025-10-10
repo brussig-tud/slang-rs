@@ -20,7 +20,7 @@ default = []
 ## Add serde support to many API objects
 serde = ["shader-slang-sys/serde"]
 
-## Enable custom, Rust-side implementations for some COM Interfaces used by Slang.
+## Enable custom, Rust-side implementations for some COM interfaces used by Slang.
 com_impls = []
 
 ## If this feature is enabled, the required *Slang* shared libs will be copied to the binary crate output location of the
