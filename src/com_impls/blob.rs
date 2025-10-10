@@ -18,10 +18,7 @@ use crate::{*, com_impls::*};
 //
 
 /// The trait of implementing [`ISlangBlob`](sys::ISlangBlob). If the `com_impls` feature is enabled, then the standard
-/// [`Blob`] type will also implement this trait. That implementation is done in the core lib however, as it should not
-/// work like an extension trait since we do not want to require that clients import it to continue using the *Slang*
-/// methods that will now take this interface (instead of references to `Blob` as is the case without `com_impls`
-/// enabled).
+/// [`Blob`] type will also implement this trait.
 pub trait ImplementsISlangBlob: Interface
 {
 	#[inline(always)]
@@ -34,9 +31,25 @@ pub trait ImplementsISlangBlob: Interface
 		}
 	}
 
-	fn get_buffer_pointer (&self) -> *const std::ffi::c_void;
+	fn get_buffer_pointer (&self) -> *const c_void;
 
 	fn get_buffer_size(&self) -> usize;
+}
+impl ImplementsISlangBlob for Blob {
+	#[inline(always)]
+	fn as_slice(&self) -> &[u8] {
+		self.as_slice()
+	}
+
+	#[inline(always)]
+	fn get_buffer_pointer(&self) -> *const c_void {
+		vcall!(self, getBufferPointer())
+	}
+
+	#[inline(always)]
+	fn get_buffer_size(&self) -> usize {
+		vcall!(self, getBufferSize())
+	}
 }
 
 

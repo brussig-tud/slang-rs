@@ -30,6 +30,7 @@ pub use sys::{
 	slang_Modifier as Modifier,
 };
 
+#[macro_export]
 macro_rules! vcall {
 	($self:expr, $method:ident($($args:expr),*)) => {
 		unsafe { ($self.vtable().$method)($self.as_raw(), $($args),*) }
@@ -185,24 +186,6 @@ impl Blob {
 	}
 }
 
-#[cfg(feature="com_impls")]
-impl com_impls::ImplementsISlangBlob for Blob {
-	#[inline(always)]
-	fn as_slice(&self) -> &[u8] {
-		self.as_slice()
-	}
-
-	#[inline(always)]
-	fn get_buffer_pointer(&self) -> *const std::ffi::c_void {
-		vcall!(self, getBufferPointer())
-	}
-
-	#[inline(always)]
-	fn get_buffer_size(&self) -> usize {
-		vcall!(self, getBufferSize())
-	}
-}
-
 #[repr(transparent)]
 #[derive(Clone)]
 pub struct GlobalSession(IUnknown);
@@ -348,7 +331,7 @@ impl Session {
 		path: &str,
 		ir_blob: &Blob,
 	) -> Result<Module> {
-		self.load_module_from_ir_blob(module_name, path, &ir_blob)
+		self.load_module_from_ir_blob_impl(module_name, path, ir_blob)
 	}
 
 	fn load_module_from_ir_blob_impl(
@@ -361,7 +344,7 @@ impl Session {
 		let path = CString::new(path).unwrap();
 		let mut diagnostics = null_mut();
 
-		let this = unsafe { self.as_raw() };
+		/*let this = unsafe { self.as_raw() };
 		let module_name_ptr = module_name.as_ptr();
 		let path_ptr = path.as_ptr();
 		let ir_blob_ptr = unsafe { ir_blob.as_raw() };
@@ -369,7 +352,7 @@ impl Session {
 		let module = unsafe {(vtable.loadModuleFromIRBlob)(
 			this, module_name_ptr, path_ptr, ir_blob_ptr, &mut diagnostics
 		)};
-		/*let module = vcall!(
+		*/let module = vcall!(
 			self,
 			loadModuleFromIRBlob(
 				module_name.as_ptr(),
@@ -377,7 +360,7 @@ impl Session {
 				ir_blob.as_raw(),
 				&mut diagnostics
 			)
-		);*/
+		);
 
 		if module.is_null() {
 			let blob = Blob(IUnknown(
