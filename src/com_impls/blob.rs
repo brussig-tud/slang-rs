@@ -1,24 +1,67 @@
 
+//////
+//
+// Imports
+//
+
+// Standard library
 use std::{ffi::c_void, mem::ManuallyDrop, sync::atomic::{AtomicU32, Ordering}};
 
+// Local imports
 use crate::{*, com_impls::*};
 
-// Minimal COM-compatible implementation of ISlangBlob.
-// The object layout must start with a vtable pointer.
+
+
+//////
+//
+// Traits
+//
+
+/// The trait of implementing [`ISlangBlob`](sys::ISlangBlob). If the `com_impls` feature is enabled, then the standard
+/// [`Blob`] type will also implement this trait. That implementation is done in the core lib however, as it should not
+/// work like an extension trait since we do not want to require that clients import it to continue using the *Slang*
+/// methods that will now take this interface (instead of references to `Blob` as is the case without `com_impls`
+/// enabled).
+pub trait ImplementsISlangBlob: Interface
+{
+	#[inline(always)]
+	fn as_slice (&self) -> &[u8] {
+		unsafe {
+			// SAFETY: The ISlangBlob interface guarantees valid buffer parameters
+			std::slice::from_raw_parts(
+				self.get_buffer_pointer() as *const u8, self.get_buffer_size()
+			)
+		}
+	}
+
+	fn get_buffer_pointer (&self) -> *const std::ffi::c_void;
+
+	fn get_buffer_size(&self) -> usize;
+}
+
+
+
+//////
+//
+// Structs
+//
+
+/// A pure Rust implementation of [`ISlangBlob`](sys::ISlangBlob) that uses a `Vec<u8>` as its backing store.
 #[repr(C)]
 pub struct VecBlob {
-	// Note: ISlangUnknown holds a pointer to ISlangUnknown__bindgen_vtable.
-	// We store a pointer to IBlobVtable which begins with the same base vtable,
-	// so layouts are compatible.
+	/// The VTable binding the COM interface to our struct.
 	vtable_: *const sys::IBlobVtable,
+
+	/// We implement reference counting using *Rust* atomics.
 	ref_count: AtomicU32,
-	// Immutable byte storage for the blob
+
+	/// The actual blob.
 	data: Vec<u8>,
 }
 impl VecBlob
 {
 	///
-	pub fn from_vec (data: Vec<u8>) -> *mut sys::ISlangBlob {
+	pub fn from_vec (data: Vec<u8>) -> *mut VecBlob {
 		// Allocate our object and return it casted to ISlangBlob pointer type
 		let mut boxed = Box::new(VecBlob {
 			vtable_: &VTABLE,
@@ -28,21 +71,21 @@ impl VecBlob
 		let ptr: *mut VecBlob = &mut *boxed;
 		// We must not drop the Box; transfer ownership to COM. Use ManuallyDrop.
 		let _ = ManuallyDrop::new(boxed);
-		ptr as *mut sys::ISlangBlob
+		ptr
 	}
 
 	///
-	pub fn from_slice (data: &[u8]) -> *mut sys::ISlangBlob {
+	pub fn from_slice (data: &[u8]) -> *mut VecBlob {
 		Self::from_vec(data.to_owned())
 	}
 
 	///
-	pub fn from_string (s: String) -> *mut sys::ISlangBlob {
+	pub fn from_string (s: String) -> *mut VecBlob {
 		Self::from_vec(s.into_bytes())
 	}
 
 	///
-	pub fn from_str (s: &str) -> *mut sys::ISlangBlob {
+	pub fn from_str (s: &str) -> *mut VecBlob {
 		Self::from_vec(s.as_bytes().to_owned())
 	}
 
@@ -65,12 +108,33 @@ unsafe impl Interface for VecBlob {
 		0x40e2,
 		[0xac, 0x58, 0x0d, 0x98, 0x9c, 0x3a, 0x01, 0x02],
 	);
+
+	#[inline(always)]
+	unsafe fn as_raw<T>(&self) -> *mut T {
+		self as *const Self as *mut T
+	}
+}
+impl ImplementsISlangBlob for VecBlob {
+	#[inline(always)]
+	fn get_buffer_pointer (&self) -> *const std::ffi::c_void {
+		self.data.as_ptr() as *const std::ffi::c_void
+	}
+
+	#[inline(always)]
+	fn get_buffer_size(&self) -> usize {
+		self.data.len()
+	}
 }
 
-#[inline]
-fn eq_guid (a: &sys::SlangUUID, b: &sys::SlangUUID) -> bool {
-	a.data1 == b.data1 && a.data2 == b.data2 && a.data3 == b.data3 && a.data4 == b.data4
-}
+
+
+//////
+//
+// COM endpoint implementations
+//
+
+////
+// Interface: IUnknown
 
 unsafe extern "C" fn query_interface (
 	this: *mut sys::ISlangUnknown,
@@ -95,7 +159,8 @@ unsafe extern "C" fn query_interface (
 		obj.ref_count.fetch_add(1, Ordering::Relaxed);
 		unsafe { *out_object = ptr; }
 		S_OK
-	} else {
+	}
+	else {
 		unsafe { *out_object = std::ptr::null_mut() };
 		// SLANG_E_NO_INTERFACE
 		E_NOINTERFACE
@@ -108,7 +173,8 @@ unsafe extern "C" fn add_ref (this: *mut sys::ISlangUnknown) -> u32 {
 	prev + 1
 }
 
-unsafe extern "C" fn release (this: *mut sys::ISlangUnknown) -> u32 {
+unsafe extern "C" fn release (this: *mut sys::ISlangUnknown) -> u32
+{
 	let obj = VecBlob::this(this);
 	let prev = obj.ref_count.fetch_sub(1, Ordering::Release);
 	if prev == 1 {
@@ -125,6 +191,10 @@ unsafe extern "C" fn release (this: *mut sys::ISlangUnknown) -> u32 {
 	}
 }
 
+
+////
+// Interface: ISlangBlob
+
 unsafe extern "C" fn get_buffer_pointer(this: *mut c_void) -> *const c_void {
 	let obj = VecBlob::this_void(this);
 	obj.data.as_ptr() as *const c_void
@@ -135,7 +205,10 @@ unsafe extern "C" fn get_buffer_size(this: *mut c_void) -> usize {
 	obj.data.len()
 }
 
-// Static vtable instance
+
+////
+// Interface binding
+
 static VTABLE: sys::IBlobVtable = sys::IBlobVtable {
 	_base: sys::ISlangUnknown__bindgen_vtable {
 		ISlangUnknown_queryInterface: query_interface,
@@ -145,28 +218,3 @@ static VTABLE: sys::IBlobVtable = sys::IBlobVtable {
 	getBufferPointer: get_buffer_pointer,
 	getBufferSize: get_buffer_size,
 };
-
-/*// Optional safe wrapper to retain ownership in Rust code while handing raw pointer to C++.
-pub struct OwnedBlob(NonNull<sys::ISlangBlob>);
-
-impl OwnedBlob {
-	pub fn new_from_vec(data: Vec<u8>) -> Self {
-		let ptr = VecBlob::from_vec(data);
-		let nn = NonNull::new(ptr).expect("VecBlob::from_vec returned null");
-		OwnedBlob(nn)
-	}
-
-	pub fn as_raw(&self) -> *mut sys::ISlangBlob {
-		self.0.as_ptr()
-	}
-}
-
-impl Drop for OwnedBlob {
-	fn drop(&mut self) {
-		unsafe {
-			// Call release on the underlying COM object
-			let unk = self.0.as_ptr() as *mut sys::ISlangUnknown;
-			((*(*unk).vtable_).ISlangUnknown_release)(unk);
-		}
-	}
-}*/

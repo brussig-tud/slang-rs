@@ -5,7 +5,7 @@ use crate::sys;
 
 mod blob;
 #[allow(unused_imports)]
-pub use blob::VecBlob; // re-export
+pub use blob::{VecBlob, ImplementsISlangBlob}; // re-export
 
 
 /// The `HRESULT` code for successful execution of a COM method.
@@ -55,4 +55,26 @@ impl<T: crate::Interface> DerefMut for ComPtr<T> {
 			&mut *self.0.as_ptr()
 		}
 	}
+}
+
+
+
+//////
+//
+// Functions
+//
+
+/// Compares two [`SlangUUID`](sys::SlangUUID) values for equality. This convenience function might get removed if at some point
+/// `SlangUUID` implements [`Eq`] or [`PartialEq`].
+///
+/// # Parameters
+/// - `a`: A reference to the first `SlangUUID` instance.
+/// - `b`: A reference to the second `SlangUUID` instance.
+///
+/// # Returns
+/// - `true` if all fields of `a` and `b` are equal.
+/// - `false` otherwise.
+#[inline(always)]
+pub fn eq_guid (a: &sys::SlangUUID, b: &sys::SlangUUID) -> bool {
+	a.data1 == b.data1 && a.data2 == b.data2 && a.data3 == b.data3 && a.data4 == b.data4
 }

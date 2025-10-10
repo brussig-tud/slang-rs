@@ -185,6 +185,24 @@ impl Blob {
 	}
 }
 
+#[cfg(feature="com_impls")]
+impl com_impls::ImplementsISlangBlob for Blob {
+	#[inline(always)]
+	fn as_slice(&self) -> &[u8] {
+		self.as_slice()
+	}
+
+	#[inline(always)]
+	fn get_buffer_pointer(&self) -> *const std::ffi::c_void {
+		vcall!(self, getBufferPointer())
+	}
+
+	#[inline(always)]
+	fn get_buffer_size(&self) -> usize {
+		vcall!(self, getBufferSize())
+	}
+}
+
 #[repr(transparent)]
 #[derive(Clone)]
 pub struct GlobalSession(IUnknown);
@@ -311,17 +329,47 @@ impl Session {
 		}
 	}
 
+	#[cfg(feature="com_impls")]
+	#[inline(always)]
+	pub fn load_module_from_ir_blob(
+		&self,
+		module_name: &str,
+		path: &str,
+		ir_blob: &impl com_impls::ImplementsISlangBlob,
+	) -> Result<Module> {
+		self.load_module_from_ir_blob_impl(module_name, path, ir_blob)
+	}
+
+	#[cfg(not(feature="com_impls"))]
+	#[inline(always)]
 	pub fn load_module_from_ir_blob(
 		&self,
 		module_name: &str,
 		path: &str,
 		ir_blob: &Blob,
 	) -> Result<Module> {
+		self.load_module_from_ir_blob(module_name, path, &ir_blob)
+	}
+
+	fn load_module_from_ir_blob_impl(
+		&self,
+		module_name: &str,
+		path: &str,
+		ir_blob: &impl Interface,
+	) -> Result<Module> {
 		let module_name = CString::new(module_name).unwrap();
 		let path = CString::new(path).unwrap();
 		let mut diagnostics = null_mut();
 
-		let module = vcall!(
+		let this = unsafe { self.as_raw() };
+		let module_name_ptr = module_name.as_ptr();
+		let path_ptr = path.as_ptr();
+		let ir_blob_ptr = unsafe { ir_blob.as_raw() };
+		let vtable = unsafe { self.vtable() };
+		let module = unsafe {(vtable.loadModuleFromIRBlob)(
+			this, module_name_ptr, path_ptr, ir_blob_ptr, &mut diagnostics
+		)};
+		/*let module = vcall!(
 			self,
 			loadModuleFromIRBlob(
 				module_name.as_ptr(),
@@ -329,7 +377,7 @@ impl Session {
 				ir_blob.as_raw(),
 				&mut diagnostics
 			)
-		);
+		);*/
 
 		if module.is_null() {
 			let blob = Blob(IUnknown(
