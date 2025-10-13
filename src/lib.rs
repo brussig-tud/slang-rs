@@ -344,15 +344,7 @@ impl Session {
 		let path = CString::new(path).unwrap();
 		let mut diagnostics = null_mut();
 
-		/*let this = unsafe { self.as_raw() };
-		let module_name_ptr = module_name.as_ptr();
-		let path_ptr = path.as_ptr();
-		let ir_blob_ptr = unsafe { ir_blob.as_raw() };
-		let vtable = unsafe { self.vtable() };
-		let module = unsafe {(vtable.loadModuleFromIRBlob)(
-			this, module_name_ptr, path_ptr, ir_blob_ptr, &mut diagnostics
-		)};
-		*/let module = vcall!(
+		let module = vcall!(
 			self,
 			loadModuleFromIRBlob(
 				module_name.as_ptr(),
