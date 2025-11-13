@@ -1,5 +1,4 @@
 use crate as slang;
-use slang::Downcast;
 
 #[test]
 fn compile() {
@@ -29,10 +28,7 @@ fn compile() {
 	let entry_point = module.find_entry_point_by_name("main").unwrap();
 
 	let program = session
-		.create_composite_component_type(&[
-			module.downcast().clone(),
-			entry_point.downcast().clone(),
-		])
+		.create_composite_component_type(&[module.into(), entry_point.into()])
 		.unwrap();
 
 	let linked_program = program.link().unwrap();

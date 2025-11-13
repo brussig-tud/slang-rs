@@ -128,10 +128,6 @@ pub unsafe trait Interface: Sized + Clone {
 	}
 }
 
-pub unsafe trait Downcast<T> {
-	fn downcast(&self) -> &T;
-}
-
 #[repr(transparent)]
 pub struct IUnknown(std::ptr::NonNull<std::ffi::c_void>);
 
@@ -494,9 +490,9 @@ unsafe impl Interface for EntryPoint {
 	const IID: UUID = uuid(0x8f241361_f5bd_4ca0_a3ac02f7fa2402b8);
 }
 
-unsafe impl Downcast<ComponentType> for EntryPoint {
-	fn downcast(&self) -> &ComponentType {
-		unsafe { std::mem::transmute(self) }
+impl From<EntryPoint> for ComponentType {
+	fn from(value: EntryPoint) -> Self {
+		unsafe { std::mem::transmute(value) }
 	}
 }
 
@@ -516,9 +512,9 @@ unsafe impl Interface for TypeConformance {
 	const IID: UUID = uuid(0x73eb3147_e544_41b5_b8f0a244df21940b);
 }
 
-unsafe impl Downcast<ComponentType> for TypeConformance {
-	fn downcast(&self) -> &ComponentType {
-		unsafe { std::mem::transmute(self) }
+impl From<TypeConformance> for ComponentType {
+	fn from(value: TypeConformance) -> Self {
+		unsafe { std::mem::transmute(value) }
 	}
 }
 
@@ -531,9 +527,9 @@ unsafe impl Interface for Module {
 	const IID: UUID = uuid(0x0c720e64_8722_4d31_8990638a98b1c279);
 }
 
-unsafe impl Downcast<ComponentType> for Module {
-	fn downcast(&self) -> &ComponentType {
-		unsafe { std::mem::transmute(self) }
+impl From<Module> for ComponentType {
+	fn from(value: Module) -> Self {
+		unsafe { std::mem::transmute(value) }
 	}
 }
 
