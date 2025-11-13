@@ -31,12 +31,12 @@ macro_rules! vcall {
 	};
 }
 
-const fn uuid(data1: u32, data2: u16, data3: u16, data4: [u8; 8]) -> UUID {
+const fn uuid(uuid: u128) -> UUID {
 	UUID {
-		data1,
-		data2,
-		data3,
-		data4,
+		data1: (uuid >> 96) as u32,
+		data2: ((uuid >> 80) & 0xffff) as u16,
+		data3: ((uuid >> 64) & 0xffff) as u16,
+		data4: (uuid as u64).to_be_bytes(),
 	}
 }
 
@@ -104,15 +104,19 @@ impl CapabilityID {
 	}
 }
 
-unsafe trait Interface: Sized {
+pub unsafe trait Interface: Sized + Clone {
+	#[doc(hidden)]
 	type Vtable;
+
 	const IID: UUID;
 
+	#[doc(hidden)]
 	#[inline(always)]
 	unsafe fn vtable(&self) -> &Self::Vtable {
 		unsafe { &**(self.as_raw() as *mut *mut Self::Vtable) }
 	}
 
+	#[doc(hidden)]
 	#[inline(always)]
 	unsafe fn as_raw<T>(&self) -> *mut T {
 		unsafe { std::mem::transmute_copy(self) }
@@ -133,12 +137,7 @@ pub struct IUnknown(std::ptr::NonNull<std::ffi::c_void>);
 
 unsafe impl Interface for IUnknown {
 	type Vtable = sys::ISlangUnknown__bindgen_vtable;
-	const IID: UUID = uuid(
-		0x00000000,
-		0x0000,
-		0x0000,
-		[0xc0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46],
-	);
+	const IID: UUID = uuid(0x00000000_0000_0000_c000000000000046);
 }
 
 impl Clone for IUnknown {
@@ -160,12 +159,7 @@ pub struct Blob(IUnknown);
 
 unsafe impl Interface for Blob {
 	type Vtable = sys::IBlobVtable;
-	const IID: UUID = uuid(
-		0x8ba5fb08,
-		0x5195,
-		0x40e2,
-		[0xac, 0x58, 0x0d, 0x98, 0x9c, 0x3a, 0x01, 0x02],
-	);
+	const IID: UUID = uuid(0x8ba5fb08_5195_40e2_ac580d989c3a0102);
 }
 
 impl Blob {
@@ -186,12 +180,7 @@ pub struct GlobalSession(IUnknown);
 
 unsafe impl Interface for GlobalSession {
 	type Vtable = sys::IGlobalSessionVtable;
-	const IID: UUID = uuid(
-		0xc140b5fd,
-		0x0c78,
-		0x452e,
-		[0xba, 0x7c, 0x1a, 0x1e, 0x70, 0xc7, 0xf7, 0x1c],
-	);
+	const IID: UUID = uuid(0xc140b5fd_0c78_452e_ba7c1a1e70c7f71c);
 }
 
 impl GlobalSession {
@@ -246,12 +235,7 @@ pub struct Session(IUnknown);
 
 unsafe impl Interface for Session {
 	type Vtable = sys::ISessionVtable;
-	const IID: UUID = uuid(
-		0x67618701,
-		0xd116,
-		0x468f,
-		[0xab, 0x3b, 0x47, 0x4b, 0xed, 0xce, 0x0e, 0x3d],
-	);
+	const IID: UUID = uuid(0x67618701_d116_468f_ab3b474bedce0e3d);
 }
 
 impl Session {
@@ -370,12 +354,7 @@ pub struct Metadata(IUnknown);
 
 unsafe impl Interface for Metadata {
 	type Vtable = sys::IMetadataVtable;
-	const IID: UUID = uuid(
-		0x8044a8a3,
-		0xddc0,
-		0x4b7f,
-		[0xaf, 0x8e, 0x2, 0x6e, 0x90, 0x5d, 0x73, 0x32],
-	);
+	const IID: UUID = uuid(0x8044a8a3_ddc0_4b7f_af8e026e905d7332);
 }
 
 impl Metadata {
@@ -400,12 +379,7 @@ pub struct ComponentType(IUnknown);
 
 unsafe impl Interface for ComponentType {
 	type Vtable = sys::IComponentTypeVtable;
-	const IID: UUID = uuid(
-		0x5bc42be8,
-		0x5c50,
-		0x4929,
-		[0x9e, 0x5e, 0xd1, 0x5e, 0x7c, 0x24, 0x01, 0x5f],
-	);
+	const IID: UUID = uuid(0x5bc42be8_5c50_4929_9e5ed15e7c24015f);
 }
 
 impl ComponentType {
@@ -517,12 +491,7 @@ pub struct EntryPoint(IUnknown);
 
 unsafe impl Interface for EntryPoint {
 	type Vtable = sys::IEntryPointVtable;
-	const IID: UUID = uuid(
-		0x8f241361,
-		0xf5bd,
-		0x4ca0,
-		[0xa3, 0xac, 0x02, 0xf7, 0xfa, 0x24, 0x02, 0xb8],
-	);
+	const IID: UUID = uuid(0x8f241361_f5bd_4ca0_a3ac02f7fa2402b8);
 }
 
 unsafe impl Downcast<ComponentType> for EntryPoint {
@@ -544,12 +513,7 @@ pub struct TypeConformance(IUnknown);
 
 unsafe impl Interface for TypeConformance {
 	type Vtable = sys::ITypeConformanceVtable;
-	const IID: UUID = uuid(
-		0x73eb3147,
-		0xe544,
-		0x41b5,
-		[0xb8, 0xf0, 0xa2, 0x44, 0xdf, 0x21, 0x94, 0x0b],
-	);
+	const IID: UUID = uuid(0x73eb3147_e544_41b5_b8f0a244df21940b);
 }
 
 unsafe impl Downcast<ComponentType> for TypeConformance {
@@ -564,12 +528,7 @@ pub struct Module(IUnknown);
 
 unsafe impl Interface for Module {
 	type Vtable = sys::IModuleVtable;
-	const IID: UUID = uuid(
-		0x0c720e64,
-		0x8722,
-		0x4d31,
-		[0x89, 0x90, 0x63, 0x8a, 0x98, 0xb1, 0xc2, 0x79],
-	);
+	const IID: UUID = uuid(0x0c720e64_8722_4d31_8990638a98b1c279);
 }
 
 unsafe impl Downcast<ComponentType> for Module {
