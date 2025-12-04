@@ -1,6 +1,6 @@
 
 use std::{ptr, ops::Deref, ops::DerefMut};
-use crate::sys;
+use crate::{sys, IUnknown, UUID};
 
 
 mod blob;
@@ -17,10 +17,37 @@ pub const E_INVALIDARG: sys::SlangResult  =  0x8007005 as i32;
 /// The `HRESULT` code indicating that the requested interface is not supported.
 pub const E_NOINTERFACE: sys::SlangResult = 0x80004002 as u32 as i32;
 
+pub unsafe trait Object: Sized {
+	#[doc(hidden)]
+	type Vtable;
 
-pub struct ComPtr<T: crate::Interface>(ptr::NonNull<T>);
+	const IID: UUID;
 
-impl<T: crate::Interface> ComPtr<T> {
+	#[doc(hidden)]
+	#[inline(always)]
+	unsafe fn vtable (&self) -> &Self::Vtable {
+		unsafe { &**(self.as_raw() as *mut *mut Self::Vtable) }
+	}
+
+	#[doc(hidden)]
+	#[inline(always)]
+	unsafe fn as_raw<T> (&self) -> *mut T {
+		unsafe { std::mem::transmute_copy(self) }
+	}
+
+	fn as_unknown (&self) -> &IUnknown {
+		// SAFETY: It is always safe to treat an `Object` as an `IUnknown`.
+		unsafe { std::mem::transmute(self) }
+	}
+
+	unsafe fn add_ref (&self) -> u32;
+
+	unsafe fn release (&self) -> u32;
+}
+
+
+pub struct ComPtr<T: Object>(ptr::NonNull<T>);
+impl<T:Object> ComPtr<T> {
 	pub fn new (object_ptr: *mut T) -> Self {
 		let nn = ptr::NonNull::new(object_ptr).expect("to-be-wrapped pointer must not be null");
 		ComPtr(nn)
@@ -30,7 +57,7 @@ impl<T: crate::Interface> ComPtr<T> {
 		self.0.as_ptr()
 	}
 }
-impl<T: crate::Interface> Drop for ComPtr<T> {
+impl<T: Object> Drop for ComPtr<T> {
 	fn drop (&mut self) {
 		unsafe {
 			// Call release on the underlying COM object
@@ -39,22 +66,35 @@ impl<T: crate::Interface> Drop for ComPtr<T> {
 		}
 	}
 }
-impl<T: crate::Interface> Deref for ComPtr<T> {
+impl<T: Object> Deref for ComPtr<T> {
 	type Target = T;
 	fn deref (&self) -> &Self::Target {
 		unsafe {
-			// Safety: The ComPtr::new() only allows valid pointers and the object cannot have been dropped.
+			// SAFETY: ComPtr::new() only allows valid pointers and it's impossible for self to have been dropped.
 			&*self.0.as_ptr()
 		}
 	}
 }
-impl<T: crate::Interface> DerefMut for ComPtr<T> {
+impl<T: Object> DerefMut for ComPtr<T> {
 	fn deref_mut(&mut self) -> &mut Self::Target {
 		unsafe {
-			// Safety: The ComPtr::new() only allows valid pointers and the object cannot have been dropped.
+			// SAFETY: ComPtr::new() only allows valid pointers and it's impossible for self to have been dropped.
 			&mut *self.0.as_ptr()
 		}
 	}
+}
+impl<T: Object> Clone for ComPtr<T> {
+	fn clone (&self) -> Self {
+		unsafe {
+			// SAFETY: We implement Drop, so we can guarantee that the ref will also get dropped eventually.
+			self.add_ref();
+		}
+		Self(self.0)
+	}
+}
+unsafe impl<T: Object> crate::Interface for ComPtr<T> {
+	type Vtable = T::Vtable;
+	const IID: UUID = T::IID;
 }
 
 

@@ -37,9 +37,9 @@ let session = global_session.create_session(&session_desc).unwrap();
 let module = session.load_module("filename.slang").unwrap();
 let entry_point = module.find_entry_point_by_name("main").unwrap();
 
-let program = session.create_composite_component_type(&[
-	module.downcast().clone(), entry_point.downcast().clone(),
-]).unwrap();
+let program = session
+	.create_composite_component_type(&[module.into(), entry_point.into()])
+	.unwrap();
 
 let linked_program = program.link().unwrap();
 

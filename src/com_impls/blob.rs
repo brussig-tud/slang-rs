@@ -113,21 +113,26 @@ impl VecBlob
 		unsafe { &mut *(this as *mut VecBlob) }
 	}
 }
-unsafe impl Interface for VecBlob {
+unsafe impl Object for VecBlob {
 	type Vtable = sys::IBlobVtable;
-	const IID: UUID = uuid(
-		0x8ba5fb08,
-		0x5195,
-		0x40e2,
-		[0xac, 0x58, 0x0d, 0x98, 0x9c, 0x3a, 0x01, 0x02],
-	);
+	const IID: UUID = uuid(0x8ba5fb08_5195_40e2_ac580d989c3a0102);
 
 	#[inline(always)]
 	unsafe fn as_raw<T>(&self) -> *mut T {
 		self as *const Self as *mut T
 	}
+
+	#[inline(always)]
+	unsafe fn add_ref (&self) -> u32 {
+		unsafe { add_ref(self.as_raw()) }
+	}
+
+	#[inline(always)]
+	unsafe fn release(&self) -> u32 {
+		unsafe { release(self.as_raw()) }
+	}
 }
-impl ImplementsISlangBlob for VecBlob {
+impl ImplementsISlangBlob for ComPtr<VecBlob> {
 	#[inline(always)]
 	fn get_buffer_pointer (&self) -> *const std::ffi::c_void {
 		self.data.as_ptr() as *const std::ffi::c_void

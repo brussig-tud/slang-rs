@@ -1,5 +1,4 @@
 use crate as slang;
-use slang::Downcast;
 
 
 //////
@@ -69,10 +68,7 @@ fn compile() {
 	let entry_point = module.find_entry_point_by_name("main").unwrap();
 
 	let program = session
-		.create_composite_component_type(&[
-			module.downcast().clone(),
-			entry_point.downcast().clone(),
-		])
+		.create_composite_component_type(&[module.into(), entry_point.into()])
 		.unwrap();
 
 	let linked_program = program.link().unwrap();
@@ -100,8 +96,8 @@ fn com_impls_blob()
 
 		let program = session
 			.create_composite_component_type(&[
-				module.downcast().clone(),
-				entry_point.downcast().clone(),
+				module.clone().into(), // <-- we're keeping a reference to the module for serializing to disk later
+				entry_point.into()
 			])
 			.unwrap();
 		let linked_program = program.link().unwrap();
@@ -128,14 +124,14 @@ fn com_impls_blob()
 			// metadata in the IR blob will be different, and the equality test at the end will fail
 			"shaders",
 			// ISlangBlob pointer
-			&*prev_blob
+			&prev_blob
 		).unwrap();
 		let entry_point = module.find_entry_point_by_name("main").unwrap();
 
 		let program = session
 			.create_composite_component_type(&[
-				module.downcast().clone(),
-				entry_point.downcast().clone(),
+				module.clone().into(), // <-- we're keeping a reference to the module for comparing to the original
+				entry_point.into()
 			])
 			.unwrap();
 		let linked_program = program.link().unwrap();
