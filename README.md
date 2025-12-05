@@ -5,9 +5,48 @@
 
 </div>
 
+This crate is a fork of [`shader-slang`](https://github.com/FloatyMonkey/slang-rs.git) by
+[Lauro Oyen](https://github.com/laurooyen) of [FloatyMonkey](https://github.com/FloatyMonkey).
+
 Supports both the modern compilation and reflection API.
 
-Currently mostly reflects the needs of our own [engine](https://github.com/FloatyMonkey/engine) but contributions are more than welcome.
+
+## Purpose
+
+This fork was created to enable plug-and-play use of the *Slang* shading language in Rust projects. No manual
+installation of Slang or the Vulkan SDK required! Just enable the `download_slang_binaries` or `build_slang_from_source`
+features, and the build script will take care of fetching the latest _supported_ version of *Slang*, either a binary
+release, or a source package, depending on which of the two features is enabled. If none of the two features are
+enabled, the crate will try to use a system-wide installation in exactly the same way upstream `shader-slang` does.
+
+**_NOTE_**: Currently, neither `download_slang_binaries` nor `build_slang_from_source` work well on Windows and can thus
+not be used there by default. You can try your luck with the `force_on_windows` feature that unlocks them. See
+[Cargo.toml](https://github.com/brussig-tud/slang-rs/blob/main/Cargo.toml#L42) for more information.
+
+
+### Secondary features
+
+The *Slang* compilation API makes heavy use of COM interfaces. Upstream `shader-slang` leaves you on your own here and
+you need to provide your own implementations if the *Slang* API requires you to pass your own data wrapped in a COM
+object. This crate provides fully functional implementations for the most useful of them so you don't have to. By
+enabling the `com_impls` feature, the following implementations become available:
+
+* `ISlangBlob`: provided by
+   [`com_impls::VecBlob`](https://github.com/brussig-tud/slang-rs/blob/main/src/com_impls/blob.rs#L62). Useful for
+   example for deserializing pre-compiled *Slang*-IR modules from disk to feed them into
+   `Session::load_module_from_ir_blob`.
+
+
+### WASM32 support
+
+This crate adds limited support for WASM32 targets. You will not be able to use *shader-slang* directly from within
+your WASM32 *Rust* code, unless you use the deprecated `wasm32-unknown-emscripten` target which might not be an option
+if you depend on one of the many *Rust* crates that stopped supporting this target. You can however bridge to a
+*shader-slang* WASM32 build via JavaScript, which is currently out-of-scope for this project and will remain so for the
+foreseeable future.
+
+WASM32 builds requires use of the `build_slang_from_source` feature.
+
 
 ## Example
 
