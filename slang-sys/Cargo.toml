@@ -15,7 +15,7 @@ serde = {version="*", features=["derive"], optional=true}
 bindgen = "*"
 reqwest = {version="*", features=["blocking"], optional=true}
 fs-set-times = "*"
-zip = {version="*", optional=true}
+zip = {version="6", optional=true}
 bytes = "*"
 
 [features]
