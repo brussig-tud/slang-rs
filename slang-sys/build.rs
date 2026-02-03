@@ -435,7 +435,7 @@ fn try_build_slang_native (src_dir: &Path, install_target_dir: &Path)
 	// Infer generators to try
 	let generators;
 	#[cfg(target_os="windows")] {
-		generators = ["Ninja", "Visual Studio 17 2022"];
+		generators = ["Ninja", "Visual Studio 18 2026", "Visual Studio 17 2022"];
 	}
 	#[cfg(target_os="macos")] {
 		 generators = ["Ninja", "Xcode"];
