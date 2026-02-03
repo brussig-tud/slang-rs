@@ -598,6 +598,12 @@ fn use_internally_built_slang (out_dir: &Path) -> Result<Option<SlangInstall>, B
 	{
 		// WASM is not yet supported
 		"wasm32" => {
+			// Try to preempt building without active Emscripten SDK
+			if let Err(err) = env::var("EMSDK") {
+				println!("cargo::error=Emscripten SDK does not appear to be active: {err}");
+				return Err(err.into());
+			}
+
 			// cmake --workflow --preset generators --fresh
 			let generators_build_path =  slang_path.join("build");
 			let generators_build_path_arg = path_to_str(generators_build_path.as_path())?;
@@ -698,7 +704,7 @@ fn main () -> Result<(), Box<dyn std::error::Error>>
 		return Err(MSG.into());
 	}
 
-	// Launch VS Code LLDB debugger if it is installed and attach to the build script
+	/*// Launch VS Code LLDB debugger if it is installed and attach to the build script
 	let url = format!(
 		"vscode://vadimcn.vscode-lldb/launch/config?{{'request':'attach','pid':{}}}", std::process::id()
 	);
@@ -706,7 +712,7 @@ fn main () -> Result<(), Box<dyn std::error::Error>>
 	    && result.status.success() {
 		std::thread::sleep(std::time::Duration::from_secs(3)); // <- give debugger time to attach
 		std::intrinsics::breakpoint();
-	}
+	}*/
 
 	// Obtain the output directory
 	let out_dir = env::var("OUT_DIR")
@@ -826,10 +832,10 @@ fn main () -> Result<(), Box<dyn std::error::Error>>
 	// Generate bindings
 
 	// Setup environment
-	if env::var("CARGO_CFG_TARGET_ARCH")? == "wasm32" {
+	/*if env::var("CARGO_CFG_TARGET_ARCH")? == "wasm32" {
 		let emclang_path = env::var("EMSDK").map(PathBuf::from)?.join("upstream/bin/clang");
 		unsafe { env::set_var("CLANG_PATH", emclang_path) };
-	}
+	}*/
 
 	link_libraries(&slang_install);
 
