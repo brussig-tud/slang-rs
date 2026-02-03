@@ -269,11 +269,7 @@ pub fn download_to_file (url: impl reqwest::IntoUrl, filepath: impl AsRef<crate:
 pub fn download_and_extract (url: impl reqwest::IntoUrl, dirpath: impl AsRef<crate::Path>)
 	-> Result<(), Box<dyn std::error::Error>>
 {
-	let response_bytes = download(url).or_else(|err| {
-		println!("cargo::error=download_and_extract: Failed to download archive!");
-		println!("cargo::error=download_and_extract: download error: {}", err.as_ref());
-		Err(err)
-	})?;
+	let response_bytes = download(url)?;
 	Ok(zip::ZipArchive::new(std::io::Cursor::new(response_bytes))?.extract(dirpath.as_ref())?)
 }
 
@@ -565,7 +561,7 @@ fn use_downloaded_slang (out_dir: &Path) -> Result<Option<SlangInstall>, Box<dyn
 			Ok(slang_install)
 		}
 		else {
-			println!("cargo::warning=cannot use downloaded Slang: {err}");
+			println!("cargo::warning=cannot use downloaded Slang archive '{}': {err}", archive_filepath.display());
 			Ok(None)
 		}
 	}
@@ -702,7 +698,7 @@ fn main () -> Result<(), Box<dyn std::error::Error>>
 		return Err(MSG.into());
 	}
 
-	/*// Launch VS Code LLDB debugger if it is installed and attach to the build script
+	// Launch VS Code LLDB debugger if it is installed and attach to the build script
 	let url = format!(
 		"vscode://vadimcn.vscode-lldb/launch/config?{{'request':'attach','pid':{}}}", std::process::id()
 	);
@@ -710,7 +706,7 @@ fn main () -> Result<(), Box<dyn std::error::Error>>
 	    && result.status.success() {
 		std::thread::sleep(std::time::Duration::from_secs(3)); // <- give debugger time to attach
 		std::intrinsics::breakpoint();
-	}*/
+	}
 
 	// Obtain the output directory
 	let out_dir = env::var("OUT_DIR")
@@ -736,7 +732,13 @@ fn main () -> Result<(), Box<dyn std::error::Error>>
 	let slang_install_option =
 		if slang_install_option.is_none() && env::var("CARGO_FEATURE_DOWNLOAD_SLANG_BINARIES").is_ok()
 		{
-			use_downloaded_slang(out_dir.as_path())?
+			match use_downloaded_slang(out_dir.as_path()) {
+				Ok(slang_install_option) => slang_install_option,
+				Err(err) => {
+					println!("cargo:warning=Downloading slang binaries failed: {err}");
+					slang_install_option
+				}
+			}
 		}
 		else { slang_install_option };
 
