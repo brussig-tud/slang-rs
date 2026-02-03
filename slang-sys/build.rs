@@ -57,7 +57,7 @@ macro_rules! SLANG_RELEASE_URL_BASE {() => {"https://github.com/shader-slang/sla
 /// Evaluates to the pattern according to which *Slang* binary releases are named.
 #[cfg(feature="download_slang_binaries")]
 #[allow(non_snake_case)]
-macro_rules! SLANG_PACKAGE_NAME {() => {"slang-{version}-{os}-{arch}.zip"};}
+macro_rules! SLANG_PACKAGE_NAME {() => {"slang-{version}-{os}-{arch}{pfsfx}.zip"};}
 
 /// Global storing the `SystemTime` when the build script main functions gained control of execution flow.
 static SCRIPT_START_TIME: LazyLock<SystemTime> = LazyLock::new(|| SystemTime::now().sub(Duration::from_secs(5)));
@@ -280,15 +280,22 @@ pub fn depend_on_downloaded_file (url: impl reqwest::IntoUrl, filepath: impl AsR
 
 ///
 #[cfg(feature="download_slang_binaries")]
-pub fn depend_on_extracted_directory (archive_path: impl AsRef<crate::Path>, dirpath: impl AsRef<crate::Path>)
+pub fn depend_on_extracted_directory (
+	archive_path: impl AsRef<crate::Path>, dirpath: impl AsRef<crate::Path>,
+	fix_timestamps_even_if_extraction_fails: bool
+)
 -> Result<(), Box<dyn std::error::Error>> {
 	println!("cargo::rerun-if-changed={}", dirpath.as_ref().display());
-	zip::ZipArchive::new(fs::File::open(archive_path.as_ref())?)?.extract(dirpath.as_ref())?;
-	if !set_timestamp_recursively(dirpath.as_ref(), *SCRIPT_START_TIME)? {
-		println!("cargo::warning=depend_on_extracted_directory: Problem setting time stamps – \
-		          Cargo change detection could fail")
+	let extract_result = zip::ZipArchive::new(fs::File::open(archive_path.as_ref())?)?.extract(
+		dirpath.as_ref()
+	);
+	if extract_result.is_ok() || fix_timestamps_even_if_extraction_fails {
+		if !set_timestamp_recursively(dirpath.as_ref(), *SCRIPT_START_TIME)? {
+			println!("cargo::warning=depend_on_extracted_directory: Problem setting time stamps – \
+			          Cargo change detection could fail")
+		}
 	}
-	Ok(())
+	extract_result.map_err(From::from)
 }
 
 ///
@@ -489,11 +496,28 @@ fn use_downloaded_slang (out_dir: &Path) -> Result<Option<SlangInstall>, Box<dyn
 	let archive_filepath = out_dir.join(package_name);
 	let slang_dir = out_dir.join("slang-install");
 	download_to_file(package_url, archive_filepath.as_path())?;
-	if depend_on_extracted_directory(archive_filepath, slang_dir.as_path()).is_ok() {
-		Ok(get_slang_install_at_path(slang_dir, "dylib"))
+	if let Err(err) = depend_on_extracted_directory(
+		&archive_filepath, &slang_dir, true
+	){
+		// The *Zip* crate sometimes fails to extract the Slang archive completely for unknown reasons. However, most if
+		// not all required files (the headers and libs) will have been extracted properly anyway. We'll check for this
+		// condition and continue with the downloaded archive if we find everything we need.
+		if    fs::exists(slang_dir.join("include/slang.h"))?
+		   && fs::exists(slang_dir.join("lib/libslang.so"))?
+		{
+			// Warn the user
+			println!(
+				"cargo::warning=archive '{}' not fully extracted: {err} - continuing anyway", archive_filepath.display()
+			);
+			Ok(get_slang_install_at_path(slang_dir, "dylib"))
+		}
+		else {
+			println!("cargo::warning=cannot use downloaded Slang: {err}");
+			Ok(None)
+		}
 	}
 	else {
-		Ok(None)
+		Ok(get_slang_install_at_path(slang_dir, "dylib"))
 	}
 }
 
