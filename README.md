@@ -45,8 +45,6 @@ if you depend on one of the many *Rust* crates that stopped supporting this targ
 *shader-slang* WASM32 build via JavaScript, which is currently out-of-scope for this project and will remain so for the
 foreseeable future.
 
-WASM32 builds requires use of the `build_slang_from_source` feature.
-
 
 ## Example
 

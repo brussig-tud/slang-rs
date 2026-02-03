@@ -59,6 +59,16 @@ macro_rules! SLANG_RELEASE_URL_BASE {() => {"https://github.com/shader-slang/sla
 #[allow(non_snake_case)]
 macro_rules! SLANG_PACKAGE_NAME {() => {"slang-{version}-{os}-{arch}{pfsfx}.zip"};}
 
+/// Evaluates to the pattern according to which *Slang* WASM releases are named.
+#[cfg(feature="download_slang_binaries")]
+#[allow(non_snake_case)]
+macro_rules! SLANG_WASM_PACKAGE_NAME {() => {"slang-{version}-wasm.zip"};}
+
+/// Evaluates to the pattern according to which *Slang* WASM lib releases are named.
+#[cfg(feature="download_slang_binaries")]
+#[allow(non_snake_case)]
+macro_rules! SLANG_WASM_LIBS_PACKAGE_NAME {() => {"slang-{version}-wasm-libs.zip"};}
+
 /// Global storing the `SystemTime` when the build script main functions gained control of execution flow.
 static SCRIPT_START_TIME: LazyLock<SystemTime> = LazyLock::new(|| SystemTime::now().sub(Duration::from_secs(5)));
 
@@ -152,7 +162,9 @@ struct SlangInstall {
 
 	include_file: PathBuf,
 	include_path_arg: String,
-	lib_type: &'static str
+	lib_type: &'static str,
+
+	was_downloaded: bool
 }
 
 
@@ -263,6 +275,24 @@ pub fn download_and_extract (url: impl reqwest::IntoUrl, dirpath: impl AsRef<cra
 		Err(err)
 	})?;
 	Ok(zip::ZipArchive::new(std::io::Cursor::new(response_bytes))?.extract(dirpath.as_ref())?)
+}
+
+///
+pub fn depend_on_file (filepath: impl AsRef<Path>) -> Result<(), Box<dyn std::error::Error>> {
+	println!("cargo::rerun-if-changed={}", filepath.as_ref().display());
+	if !set_timestamp_with_warning(filepath.as_ref(), *SCRIPT_START_TIME) {
+		println!("cargo::warning=depend_on_file: Problem setting time stamp – Cargo change detection could fail")
+	}
+	Ok(())
+}
+
+///
+pub fn depend_on_copied_file (source_filepath: impl AsRef<Path>, target_filepath: impl AsRef<Path>)
+	-> Result<(), Box<dyn std::error::Error>>
+{
+	println!("cargo::rerun-if-changed={}", source_filepath.as_ref().display());
+	fs::copy(source_filepath, &target_filepath)?;
+	depend_on_file(target_filepath)
 }
 
 ///
@@ -386,7 +416,7 @@ fn build_slang_native_with_generator (src_dir: &Path, install_target_dir: &Path,
 	Ok(check_cmake_output(cmake_result)?)
 }
 
-/// Try to build *Slang*-native for the current build type, trying a several generators that make sense for the current
+/// Try to build *Slang*-native for the current build type, trying several generators that make sense for the current
 /// platform until one of them succeeds, and install it into the indicated target directory. If none of the generators
 /// work, the function returns an error containing the output of the final *CMake* invocation that was run.
 fn try_build_slang_native (src_dir: &Path, install_target_dir: &Path)
@@ -446,7 +476,8 @@ fn get_slang_install_at_path (slang_install_path: impl AsRef<Path>, lib_type: &'
 	Some(SlangInstall {
 		directory,
 		include_path_arg: format!("-I{}", include_path.display()),
-		include_path, include_file, lib_type
+		include_path, include_file, lib_type,
+		was_downloaded: false
 	})
 }
 
@@ -471,23 +502,31 @@ fn use_slang_from_system () -> Result<Option<SlangInstall>, Box<dyn std::error::
 fn use_downloaded_slang (out_dir: &Path) -> Result<Option<SlangInstall>, Box<dyn std::error::Error>>
 {
 	// Determine architecture
+	let is_wasm = env::var("CARGO_CFG_TARGET_ARCH")? == "wasm32";
 	let architecture =
-		     if cfg!(target_arch="x86_64") { "x86_64" }
-		else if cfg!(target_arch="aarch64") { "aarch64" }
+		     if env::var("CARGO_CFG_TARGET_ARCH")? == "x86_64" { "x86_64" }
+		else if env::var("CARGO_CFG_TARGET_ARCH")? == "aarch64" { "aarch64" }
+		else if is_wasm { "wasm" }
 		else { return Err("Unsupported build architecture".into()); };
 
 	// Determine operating system
 	let platform_suffix;
 	let operating_system =
-		     if cfg!(target_os="linux") { platform_suffix = LINUX_PLATFORM_SUFFIX; "linux" }
-		else if cfg!(target_os="windows") { platform_suffix=""; "windows" }
-		else if cfg!(target_os="macos") { platform_suffix=""; "macos" }
+		     if env::var("CARGO_CFG_TARGET_OS")? == "linux" { platform_suffix = LINUX_PLATFORM_SUFFIX; "linux" }
+		else if env::var("CARGO_CFG_WINDOWS").is_ok() { platform_suffix=""; "windows" }
+		else if env::var("CARGO_CFG_TARGET_OS")? == "macos" { platform_suffix=""; "macos" }
+		else if is_wasm { platform_suffix=""; "" }
 		else { return Err("Unsupported build operating system".into()); };
 
 	// Compile package name and URL
-	let package_name = format!(
-		SLANG_PACKAGE_NAME!(), version=SLANG_VERSION, os=operating_system, arch=architecture, pfsfx=platform_suffix
-	);
+	let package_name = if !is_wasm {
+		format!(
+			SLANG_PACKAGE_NAME!(), version=SLANG_VERSION, os=operating_system, arch=architecture, pfsfx=platform_suffix
+		)
+	}
+	else {
+		format!(SLANG_WASM_PACKAGE_NAME!(), version=SLANG_VERSION)
+	};
 	let package_url = reqwest::Url::parse(
 		format!(SLANG_RELEASE_URL_BASE!(), version=SLANG_VERSION).as_str()
 	)?.join(package_name.as_str())?;
@@ -495,6 +534,14 @@ fn use_downloaded_slang (out_dir: &Path) -> Result<Option<SlangInstall>, Box<dyn
 	// Attempt the download
 	let archive_filepath = out_dir.join(package_name);
 	let slang_dir = out_dir.join("slang-install");
+	if is_wasm {
+		// 1 extra archive with the libs and headers
+		let libs_package_name = format!(SLANG_WASM_LIBS_PACKAGE_NAME!(), version=SLANG_VERSION);
+		let libs_package_url = reqwest::Url::parse(
+			format!(SLANG_RELEASE_URL_BASE!(), version=SLANG_VERSION).as_str()
+		)?.join(libs_package_name.as_str())?;
+		download_and_extract (libs_package_url, &slang_dir)?;
+	}
 	download_to_file(package_url, archive_filepath.as_path())?;
 	if let Err(err) = depend_on_extracted_directory(
 		&archive_filepath, &slang_dir, true
@@ -509,7 +556,13 @@ fn use_downloaded_slang (out_dir: &Path) -> Result<Option<SlangInstall>, Box<dyn
 			println!(
 				"cargo::warning=archive '{}' not fully extracted: {err} - continuing anyway", archive_filepath.display()
 			);
-			Ok(get_slang_install_at_path(slang_dir, "dylib"))
+			let slang_install = get_slang_install_at_path(slang_dir, "dylib");
+			let slang_install = if let Some(mut si) = slang_install {
+				si.was_downloaded = true;
+				Some(si)
+			}
+			else { slang_install };
+			Ok(slang_install)
 		}
 		else {
 			println!("cargo::warning=cannot use downloaded Slang: {err}");
@@ -517,7 +570,13 @@ fn use_downloaded_slang (out_dir: &Path) -> Result<Option<SlangInstall>, Box<dyn
 		}
 	}
 	else {
-		Ok(get_slang_install_at_path(slang_dir, "dylib"))
+		let slang_install = get_slang_install_at_path(slang_dir, "dylib");
+		let slang_install = if let Some(mut si) = slang_install {
+			si.was_downloaded = true;
+			Some(si)
+		}
+		else { slang_install };
+		Ok(slang_install)
 	}
 }
 
@@ -643,8 +702,8 @@ fn main () -> Result<(), Box<dyn std::error::Error>>
 		return Err(MSG.into());
 	}
 
-	// Launch VS Code LLDB debugger if it is installed and attach to the build script
-	/*let url = format!(
+	/*// Launch VS Code LLDB debugger if it is installed and attach to the build script
+	let url = format!(
 		"vscode://vadimcn.vscode-lldb/launch/config?{{'request':'attach','pid':{}}}", std::process::id()
 	);
 	if let Ok(result) = std::process::Command::new("code").arg("--open-url").arg(url).output()
@@ -675,7 +734,7 @@ fn main () -> Result<(), Box<dyn std::error::Error>>
 	// Next attempt: download a binary release from the Slang GitHub repository if the corresponding feature is enabled
 	#[cfg(feature="download_slang_binaries")]
 	let slang_install_option =
-		if slang_install_option.is_none() && !is_wasm && env::var("CARGO_FEATURE_DOWNLOAD_SLANG_BINARIES").is_ok()
+		if slang_install_option.is_none() && env::var("CARGO_FEATURE_DOWNLOAD_SLANG_BINARIES").is_ok()
 		{
 			use_downloaded_slang(out_dir.as_path())?
 		}
@@ -722,7 +781,19 @@ fn main () -> Result<(), Box<dyn std::error::Error>>
 		};
 
 		// In case of WASM, copy the output WASM binary and JS/TS bindings
-		if is_wasm {
+		if is_wasm && slang_install.was_downloaded {
+			depend_on_copied_file(slang_install.directory.join(
+				"interface.d.ts"), target_dir.join("interface.d.ts")
+			)?;
+			depend_on_copied_file(
+				slang_install.directory.join("slang-wasm.js"), target_dir.join("slang-wasm.js")
+			)?;
+			depend_on_copied_file(
+				slang_install.directory.join("slang-wasm.wasm"), target_dir.join("slang-wasm.wasm")
+			)?;
+		}
+		else if is_wasm
+		{
 			for entry in fs::read_dir(slang_install.directory.join("bin"))
 				.expect("The Slang installation directory must contain a 'bin' subdirectory")
 			{
@@ -755,7 +826,6 @@ fn main () -> Result<(), Box<dyn std::error::Error>>
 	// Setup environment
 	if env::var("CARGO_CFG_TARGET_ARCH")? == "wasm32" {
 		let emclang_path = env::var("EMSDK").map(PathBuf::from)?.join("upstream/bin/clang");
-		println!("cargo::warning=EMclang: {}", emclang_path.display());
 		unsafe { env::set_var("CLANG_PATH", emclang_path) };
 	}
 
