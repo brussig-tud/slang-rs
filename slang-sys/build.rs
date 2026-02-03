@@ -441,17 +441,19 @@ fn try_build_slang_native (src_dir: &Path, install_target_dir: &Path)
 	}
 
 	// Try building with the generator
-	let mut result = Ok(());
+	let mut final_result = Ok(());
 	for generator in generators {
-		result = build_slang_native_with_generator(src_dir, install_target_dir, generator, cmake_build_type);
+		let result = build_slang_native_with_generator(src_dir, install_target_dir, generator, cmake_build_type);
 		if result.is_ok() {
 			return result;
 		}
-		std::fs::remove_dir_all(src_dir.join("build"))
+		println!("cargo::warning=Could not use CMake generator '{generator}': {}", result.as_ref().unwrap_err());
+		fs::remove_dir_all(src_dir.join("build"))
 			.expect("Failed to clean up the Slang build directory after failed CMake build attempt");
+		final_result = result;
 		continue;
 	}
-	result
+	final_result
 }
 
 ///
