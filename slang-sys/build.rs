@@ -42,7 +42,12 @@ use zip;
 
 /// The *Slang* version this crate is tested against.
 #[allow(dead_code)] // <- we only need this for the download feature, but want to keep it anyway as it's important info
-const SLANG_VERSION: &str = "2025.14.3";
+const SLANG_VERSION: &str = "2026.2";
+
+/// The current Linux platform suffix used in release package names
+#[allow(dead_code)] // <- we only need this for the download feature, and even there only for Linux, but want to keep it
+                    //    anyway as it's important info
+const LINUX_PLATFORM_SUFFIX: &str = "-glibc-2.27";
 
 /// Evaluates to the pattern according to which the parent URL for *Slang* binary releases is composed.
 #[cfg(feature="download_slang_binaries")]
@@ -465,15 +470,16 @@ fn use_downloaded_slang (out_dir: &Path) -> Result<Option<SlangInstall>, Box<dyn
 		else { return Err("Unsupported build architecture".into()); };
 
 	// Determine operating system
+	let platform_suffix;
 	let operating_system =
-		     if cfg!(target_os="linux") { "linux" }
-		else if cfg!(target_os="windows") { "windows" }
-		else if cfg!(target_os="macos") { "macos" }
+		     if cfg!(target_os="linux") { platform_suffix = LINUX_PLATFORM_SUFFIX; "linux" }
+		else if cfg!(target_os="windows") { platform_suffix=""; "windows" }
+		else if cfg!(target_os="macos") { platform_suffix=""; "macos" }
 		else { return Err("Unsupported build operating system".into()); };
 
 	// Compile package name and URL
 	let package_name = format!(
-		SLANG_PACKAGE_NAME!(), version=SLANG_VERSION, os=operating_system, arch=architecture
+		SLANG_PACKAGE_NAME!(), version=SLANG_VERSION, os=operating_system, arch=architecture, pfsfx=platform_suffix
 	);
 	let package_url = reqwest::Url::parse(
 		format!(SLANG_RELEASE_URL_BASE!(), version=SLANG_VERSION).as_str()
