@@ -157,11 +157,13 @@ impl std::error::Error for HttpResponseNotOkError {}
 struct SlangInstall {
 	directory: PathBuf,
 
-	#[allow(dead_code)] // we might need this in the future
+	#[expect(dead_code)] // we might need this in the future
 	include_path: PathBuf,
 
 	include_file: PathBuf,
 	include_path_arg: String,
+
+	#[expect(dead_code)] // it would seem we can let Cargo use whatever lib is there
 	lib_type: &'static str,
 
 	was_downloaded: bool
@@ -834,7 +836,7 @@ fn main () -> Result<(), Box<dyn std::error::Error>>
 	// Generate bindings
 
 	// Setup environment
-	/*if env::var("CARGO_CFG_TARGET_ARCH")? == "wasm32" {
+	/*if is_wasm {
 		let emclang_path = env::var("EMSDK").map(PathBuf::from)?.join("upstream/bin/clang");
 		unsafe { env::set_var("CLANG_PATH", emclang_path) };
 	}*/
@@ -892,7 +894,7 @@ fn link_libraries (slang_install: &SlangInstall)
 	}
 
 	println!("cargo:rustc-link-search=native={}", lib_dir.display());
-	println!("cargo:rustc-link-lib={}=slang", slang_install.lib_type);
+	println!("cargo:rustc-link-lib=slang"/*, slang_install.lib_type*/);
 }
 
 #[derive(Debug)]
