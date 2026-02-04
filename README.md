@@ -19,10 +19,6 @@ features, and the build script will take care of fetching the latest _supported_
 release, or a source package, depending on which of the two features is enabled. If none of the two features are
 enabled, the crate will try to use a system-wide installation in exactly the same way upstream `shader-slang` does.
 
-**_NOTE_**: Currently, neither `download_slang_binaries` nor `build_slang_from_source` work well on Windows and can thus
-not be used there by default. You can try your luck with the `force_on_windows` feature that unlocks them. See
-[Cargo.toml](https://github.com/brussig-tud/slang-rs/blob/main/Cargo.toml#L42) for more information.
-
 
 ### Secondary features
 

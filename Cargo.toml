@@ -39,17 +39,5 @@ download_slang_binaries = ["shader-slang-sys/download_slang_binaries"]
 ### This feature is problematic on Windows (see `force_on_windows` below)
 build_slang_from_source = ["shader-slang-sys/build_slang_from_source"]
 
-## On Windows, enabling the `download_slang_binaries` or `build_slang_from_source` features will stop the build process
-## with an error unless this feature is also enabled (it is ignored on all other platforms). Those features work per se,
-## but on Windows they are useless for important use cases. For example, if a crate's build script depends on Slang-rs
-## to prepare shaders, then the build will fail since Slang.dll will be in a place unknown to the compiled build script.
-## Fixing this would require either
-## (a) copying Slang.dll into the a-priory unknown `out` directory containing the build script, or
-## (b) the $PATH seen by the build script would have to include the `bin` directory of the created Slang install tree.
-##
-## Cargo provides no means of implementing either option while staying in the realm of proper and portable usage. With
-## ridiculous hackery it's potentially possible, but too unfeasible to attempt (for now).
-force_on_windows = ["shader-slang-sys/force_on_windows"]
-
 [workspace]
 members = ["slang-sys"]

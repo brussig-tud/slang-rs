@@ -695,19 +695,6 @@ fn main () -> Result<(), Box<dyn std::error::Error>>
 	// Save build script start time for de-confusing Cargo change detection
 	let _ = *SCRIPT_START_TIME;
 
-	// Sanity checks
-	let is_windows = env::var("CARGO_CFG_WINDOWS").is_ok();
-	if     is_windows && !env::var("CARGO_FEATURE_FORCE_ON_WINDOWS").is_ok()
-	   && (   env::var("CARGO_FEATURE_DOWNLOAD_SLANG_BINARIES").is_ok()
-	       || env::var("CARGO_FEATURE_BUILD_SLANG_FROM_SOURCE").is_ok())
-	{
-		const MSG: &str =
-			"Features `download_slang_binaries` and `build_slang_from_source` are mostly useless on Windows! Use the \
-			`force_on_windows` feature to disable this error (and consult its documentation for more info).";
-		println!("cargo::error={MSG}");
-		return Err(MSG.into());
-	}
-
 	/*// Launch VS Code LLDB debugger if it is installed and attach to the build script
 	let url = format!(
 		"vscode://vadimcn.vscode-lldb/launch/config?{{'request':'attach','pid':{}}}", std::process::id()
@@ -732,10 +719,12 @@ fn main () -> Result<(), Box<dyn std::error::Error>>
 
 	// The first try is always the system Slang
 	let is_wasm = env::var("CARGO_CFG_TARGET_ARCH")? == "wasm32";
-	let slang_install_option = if !is_wasm {
-		use_slang_from_system()?
-	}
-	else { None };
+	let is_windows = env::var("CARGO_CFG_WINDOWS").is_ok();
+	assert!(
+		(!is_wasm && !is_windows) || is_wasm != is_windows,
+		"both WASM and Windows target detected simultaneously – Cargo seems to be malfunctioning"
+	);
+	let slang_install_option = use_slang_from_system()?;
 
 	// Next attempt: download a binary release from the Slang GitHub repository if the corresponding feature is enabled
 	#[cfg(feature="download_slang_binaries")]
@@ -763,15 +752,7 @@ fn main () -> Result<(), Box<dyn std::error::Error>>
 	// Obtained _some_ Slang install, so we can continue
 	let slang_install = if let Some(slang_install) = slang_install_option { slang_install }
 	else {
-		let msg = format!(
-			"Unable to find (or download, or build) a usable Slang installation!{}{}",
-			if is_windows {
-				" On Windows, the recommended way is to install Slang binaries, point the environment variable \
-				 `SLANG_DIR` to the installation root directory, and making sure that `%SLANG_DIR%\\bin` is in the \
-				  system `PATH`."
-			} else {""},
-			if is_wasm {" Note that for WASM builds, the feature `build_slang_from_source` MUST be used." } else {""}
-		);
+		let msg = format!("Unable to find (or download, or build) a usable Slang installation!");
 		println!("cargo::error={msg}");
 		return Err(msg.into());
 	};
@@ -780,17 +761,36 @@ fn main () -> Result<(), Box<dyn std::error::Error>>
 	if env::var("CARGO_FEATURE_COPY_LIBS").is_ok()
 	{
 		// Copy libs
-		for entry in fs::read_dir(slang_install.directory.join("lib"))
-		    .expect("The Slang installation directory must contain a 'lib' subdirectory")
+		if !is_windows
 		{
-			let entry = entry.unwrap();
-			if entry.file_type().unwrap().is_file() {
-				fs::copy(entry.path(), target_dir.join(entry.file_name()))
-					.expect(format!(
-						"Failed to copy '{}' to '{}'", entry.path().display(), target_dir.display()
-					).as_str());
-			}
-		};
+			for entry in fs::read_dir(slang_install.directory.join("lib"))
+				.expect("The Slang installation directory must contain a 'lib' subdirectory")
+			{
+				let entry = entry.unwrap();
+				if entry.file_type().unwrap().is_file() {
+					fs::copy(entry.path(), target_dir.join(entry.file_name()))
+						.expect(format!(
+							"Failed to copy '{}' to '{}'", entry.path().display(), target_dir.display()
+						).as_str());
+				}
+			};
+		}
+		else
+		{
+			for entry in fs::read_dir(slang_install.directory.join("bin"))
+				.expect("The Slang installation directory must contain a 'bin' subdirectory")
+			{
+				let entry = entry.unwrap();
+				if entry.file_type().unwrap().is_file() {
+					if let Some(ext) = entry.path().extension() && ext.to_ascii_lowercase() == "dll" {
+						fs::copy(entry.path(), target_dir.join(entry.file_name()))
+							.expect(format!(
+								"Failed to copy '{}' to '{}'", entry.path().display(), target_dir.display()
+							).as_str());
+					}
+				}
+			};
+		}
 
 		// In case of WASM, copy the output WASM binary and JS/TS bindings
 		if is_wasm && slang_install.was_downloaded {
