@@ -42,12 +42,12 @@ use zip;
 
 /// The *Slang* version this crate is tested against.
 #[allow(dead_code)] // <- we only need this for the download feature, but want to keep it anyway as it's important info
-const SLANG_VERSION: &str = "2026.1.2";
+const SLANG_VERSION: &str = "2026.2.1";
 
 /// The current Linux platform suffix used in release package names
-#[allow(dead_code)] // <- we only need this for the download feature, and even there only for Linux, but want to keep it
-                    //    anyway as it's important info
-const LINUX_PLATFORM_SUFFIX: &str = "-glibc-2.27";
+#[allow(dead_code)] // <- we only need this for the download feature, and even there only for some Linux releases, but
+                    //    we want to keep it anyway as it's important info
+const LINUX_PLATFORM_SUFFIX: &str = "";
 
 /// Evaluates to the pattern according to which the parent URL for *Slang* binary releases is composed.
 #[cfg(feature="download_slang_binaries")]
