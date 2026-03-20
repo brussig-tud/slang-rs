@@ -8,6 +8,7 @@
 #![allow(internal_features)]
 
 // Enable intrinsics so we can debug this build script
+#![allow(unused_features)] // we only need this when the build script debugging code is uncommented
 #![feature(core_intrinsics)]
 
 
@@ -793,7 +794,8 @@ fn main () -> Result<(), Box<dyn std::error::Error>>
 		}
 
 		// In case of WASM, copy the output WASM binary and JS/TS bindings
-		if is_wasm && slang_install.was_downloaded {
+		if is_wasm && slang_install.was_downloaded
+		{
 			depend_on_copied_file(slang_install.directory.join(
 				"interface.d.ts"), target_dir.join("interface.d.ts")
 			)?;
