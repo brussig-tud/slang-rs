@@ -1,15 +1,15 @@
 
 //////
 //
-// Language config
+// Language config (uncomment when debugging this build script)
 //
 
-// No point enabling internal features if we still get warnings
+/*// No point enabling internal features if we still get warnings
 #![allow(internal_features)]
 
 // Enable intrinsics so we can debug this build script
 #![allow(unused_features)] // we only need this when the build script debugging code is uncommented
-#![feature(core_intrinsics)]
+#![feature(core_intrinsics)]*/
 
 
 
