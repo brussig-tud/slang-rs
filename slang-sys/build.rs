@@ -43,7 +43,7 @@ use zip;
 
 /// The *Slang* version this crate is tested against.
 #[allow(dead_code)] // <- we only need this for the download feature, but want to keep it anyway as it's important info
-const SLANG_VERSION: &str = "2026.5.1";
+const SLANG_VERSION: &str = "2026.7";
 
 /// The current Linux platform suffix used in release package names
 #[allow(dead_code)] // <- we only need this for the download feature, and even there only for some Linux releases, but
